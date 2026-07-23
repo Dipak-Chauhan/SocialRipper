@@ -4,7 +4,7 @@
   --panel: #f5f4ee;
   --white: #fffef8;
   --ink: #11110f;
-  --muted: #6d6c65;
+  --muted: #595852;
   --line: #aaa89f;
   --orange: #f04b23;
   --orange-dark: #c93514;
@@ -122,7 +122,7 @@ svg {
   margin-top: 3px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -221,7 +221,7 @@ h1 span:last-child {
 .system-readout span,
 .system-readout strong {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.04em;
 }
 
@@ -238,7 +238,7 @@ h1 span:last-child {
   margin: 22px 0 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.55;
 }
 
@@ -266,7 +266,7 @@ h1 span:last-child {
   color: var(--white);
   background: var(--ink);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.07em;
 }
@@ -346,7 +346,7 @@ h1 span:last-child {
 }
 
 .url-control input::placeholder {
-  color: #96948c;
+  color: var(--muted);
 }
 
 .paste-button {
@@ -430,7 +430,7 @@ h1 span:last-child {
   margin-top: 4px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -453,7 +453,7 @@ h1 span:last-child {
 }
 
 .format-option input:checked + span small {
-  color: #ffe4dc;
+  color: var(--ink);
 }
 
 .select-control {
@@ -563,7 +563,7 @@ h1 span:last-child {
 
 .working-state div span {
   color: #555349;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .spinner {
@@ -593,7 +593,7 @@ h1 span:last-child {
   justify-content: space-between;
   margin-bottom: -8px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
 }
@@ -643,7 +643,7 @@ h1 span:last-child {
   background: var(--ink);
   border: 1px solid var(--white);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -656,7 +656,7 @@ h1 span:last-child {
   margin-bottom: 5px;
   color: var(--orange-dark);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -677,7 +677,7 @@ h1 span:last-child {
   margin: 6px 0 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -712,7 +712,7 @@ h1 span:last-child {
   color: var(--white);
   background: var(--ink);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
 }
@@ -731,7 +731,7 @@ h1 span:last-child {
   padding: 0 10px;
   border-right: 1px solid var(--ink);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   transition: color 120ms ease, background 120ms ease;
 }
@@ -742,7 +742,7 @@ h1 span:last-child {
 
 .platform-tag b {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .platform-tag.is-active {
@@ -771,7 +771,7 @@ h1 span:last-child {
 
 .method header span {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.07em;
 }
@@ -807,7 +807,7 @@ h1 span:last-child {
 .method li > b {
   color: var(--orange-dark);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .method li span {
@@ -821,7 +821,7 @@ h1 span:last-child {
   margin-bottom: 9px;
   color: var(--ink);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.05em;
 }
 
@@ -834,7 +834,7 @@ footer {
   color: #b8b7af;
   background: var(--ink);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
 }
@@ -908,7 +908,7 @@ footer {
   }
 
   .brand-copy small {
-    font-size: 7px;
+    font-size: 10px;
   }
 
   .masthead-meta > span:first-child {
@@ -920,7 +920,7 @@ footer {
   }
 
   .engine-status {
-    font-size: 8px;
+    font-size: 10px;
   }
 
   .intro-panel {
@@ -947,7 +947,7 @@ footer {
 
   .tool-bar {
     padding: 0 11px;
-    font-size: 8px;
+    font-size: 10px;
   }
 
   .tool-bar span:last-child {
