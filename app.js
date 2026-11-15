@@ -22,6 +22,7 @@ const resultTitle = document.querySelector('#result-title');
 const resultSummary = document.querySelector('#result-summary');
 const downloadButton = document.querySelector('#download-button');
 const downloadLabel = document.querySelector('#download-label');
+const engineStatus = document.querySelector('#engine-status');
 
 const qualityChoices = {
   mp4: [
@@ -83,6 +84,32 @@ function setWorking(active, title = '', copy = '') {
 function setAnalyzeBusy(busy) {
   analyzeButton.disabled = busy;
   analyzeButton.querySelector('span').textContent = busy ? 'Scanning source...' : 'Inspect link';
+}
+
+function clearInspection() {
+  if (activeRequest) {
+    activeRequest.abort();
+    activeRequest = null;
+    setAnalyzeBusy(false);
+    setWorking(false);
+  }
+  resultCard.hidden = true;
+  currentMedia = null;
+  analyzedUrl = '';
+  analyzedContentType = '';
+}
+
+async function updateEngineStatus() {
+  let label = 'ENGINE UNAVAILABLE';
+  try {
+    const response = await fetch('/api/health', { cache: 'no-store' });
+    if (response.ok) {
+      const { tools } = await response.json();
+      label = tools['gallery-dl'] ? 'ENGINE ONLINE' : 'VIDEO / AUDIO ONLY';
+      engineStatus.classList.add('is-online');
+    }
+  } catch {}
+  engineStatus.textContent = label;
 }
 
 function platformFromUrl(value) {
@@ -222,6 +249,7 @@ async function readError(response) {
 
 async function analyzeMedia(event) {
   event.preventDefault();
+  if (downloadButton.disabled) return;
   const url = urlInput.value.trim();
   const contentType = selectedContentType();
   setError();
@@ -242,7 +270,8 @@ async function analyzeMedia(event) {
   }
 
   activeRequest?.abort();
-  activeRequest = new AbortController();
+  const request = new AbortController();
+  activeRequest = request;
   resultCard.hidden = true;
   setAnalyzeBusy(true);
   setWorking(true, 'Inspecting source...', 'This usually takes a few seconds.');
@@ -252,22 +281,25 @@ async function analyzeMedia(event) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, contentType }),
-      signal: activeRequest.signal
+      signal: request.signal
     });
 
     if (!response.ok) throw new Error(await readError(response));
     const media = await response.json();
+    if (activeRequest !== request || urlInput.value.trim() !== url || selectedContentType() !== contentType) return;
     analyzedUrl = url;
     analyzedContentType = contentType;
     showResult(media);
   } catch (error) {
-    if (error.name !== 'AbortError') {
+    if (activeRequest === request && error.name !== 'AbortError') {
       setError(error.message || 'Could not read this link.');
     }
   } finally {
-    setAnalyzeBusy(false);
-    setWorking(false);
-    activeRequest = null;
+    if (activeRequest === request) {
+      activeRequest = null;
+      setAnalyzeBusy(false);
+      setWorking(false);
+    }
   }
 }
 
@@ -280,7 +312,9 @@ function filenameFromResponse(response, fallback) {
 async function downloadMedia() {
   const contentType = selectedContentType();
   if (
-    !currentMedia
+    downloadButton.disabled
+    || activeRequest
+    || !currentMedia
     || analyzedUrl !== urlInput.value.trim()
     || analyzedContentType !== contentType
   ) return;
@@ -288,6 +322,7 @@ async function downloadMedia() {
   const format = selectedFormat();
   const quality = qualitySelect.value;
   downloadButton.disabled = true;
+  analyzeButton.disabled = true;
   setError();
   const outputLabel = contentType === 'carousel' ? 'ZIP' : format.toUpperCase();
   setWorking(true, `Preparing ${outputLabel}...`, 'The time needed depends on the file size.');
@@ -323,6 +358,7 @@ async function downloadMedia() {
     setError(error.message || 'Could not download this media.');
   } finally {
     downloadButton.disabled = false;
+    analyzeButton.disabled = false;
     setWorking(false);
   }
 }
@@ -347,19 +383,14 @@ downloadButton.addEventListener('click', downloadMedia);
 qualitySelect.addEventListener('change', updateResultSummary);
 formatInputs.forEach((input) => input.addEventListener('change', updateQualityChoices));
 contentTypeSelect.addEventListener('change', () => {
+  clearInspection();
   updateContentType();
-  resultCard.hidden = true;
-  currentMedia = null;
-  analyzedContentType = '';
+  setError();
 });
 urlInput.addEventListener('input', () => {
   setError();
   updatePlatform();
-  if (urlInput.value.trim() !== analyzedUrl) {
-    resultCard.hidden = true;
-    currentMedia = null;
-    analyzedContentType = '';
-  }
+  if (urlInput.value.trim() !== analyzedUrl) clearInspection();
 });
 resultImage.addEventListener('error', () => {
   resultImage.hidden = true;
@@ -371,3 +402,4 @@ resultImage.addEventListener('load', () => {
   }
 });
 updateContentType();
+updateEngineStatus();

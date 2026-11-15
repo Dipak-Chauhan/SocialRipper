@@ -9,8 +9,8 @@
     >
     <meta name="theme-color" content="#e7e5de">
     <title>Social Ripper / Local Media Tool</title>
-    <link rel="stylesheet" href="/social-ripper.css?v=5">
-    <script src="/app.js?v=4" defer></script>
+    <link rel="stylesheet" href="/social-ripper.css?v=7">
+    <script src="/app.js?v=5" defer></script>
   </head>
   <body>
     <div class="app-frame">
@@ -24,7 +24,7 @@
         </a>
         <div class="masthead-meta">
           <span>BUILD / 01</span>
-          <span class="engine-status"><i aria-hidden="true"></i>ENGINE ONLINE</span>
+          <span class="engine-status" id="engine-status" role="status">CHECKING ENGINE</span>
         </div>
       </header>
 
@@ -45,7 +45,8 @@
             </div>
 
             <p class="rights-note">
-              Download only media you own or have permission to save. Platform restrictions still apply.
+              <strong>Download only media you own or have permission to save.</strong>
+              Platform restrictions still apply.
             </p>
           </aside>
 

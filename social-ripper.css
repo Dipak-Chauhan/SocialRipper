@@ -147,12 +147,16 @@ svg {
   gap: 9px;
 }
 
-.engine-status i {
+.engine-status::before {
+  content: "";
   width: 8px;
   height: 8px;
-  background: var(--green);
   border: 1px solid var(--ink);
   border-radius: 50%;
+}
+
+.engine-status.is-online::before {
+  background: var(--green);
 }
 
 .workspace {
@@ -236,10 +240,18 @@ h1 span:last-child {
 .rights-note {
   max-width: 440px;
   margin: 22px 0 0;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 1.55;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: var(--yellow);
+  border: 1px solid var(--ink);
+  border-left-width: 4px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.rights-note strong {
+  display: block;
+  margin-bottom: 3px;
 }
 
 .tool-panel {
@@ -1009,7 +1021,7 @@ footer {
     font-size: 0;
   }
 
-  .engine-status i {
+  .engine-status::before {
     width: 10px;
     height: 10px;
   }

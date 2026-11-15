@@ -1,19 +1,19 @@
 const http = require('node:http');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const youtubeDlPackage = require('youtube-dl-exec');
-const ffmpegPath = require('ffmpeg-static');
+const { pipeline } = require('node:stream/promises');
+const {
+  AppError, checkFileBudget, downloadImages, findExecutable, getMediaTools,
+  inspectImages, parseToolJson, requireTool, runYtDlp
+} = require('./media-tools');
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '127.0.0.1';
 const MAX_BODY_BYTES = 16 * 1024;
-const MAX_ACTIVE_DOWNLOADS = 2;
+const MAX_ACTIVE_JOBS = 2;
 const MAX_FILE_SIZE = '250M';
-const MAX_FILE_BYTES = 250 * 1024 * 1024;
-const YT_DLP_PATH = youtubeDlPackage.constants.YOUTUBE_DL_PATH;
 
 const SUPPORTED_DOMAINS = [
   'instagram.com',
@@ -42,14 +42,8 @@ const VIDEO_QUALITIES = new Set(['best', '1080', '720', '480']);
 const AUDIO_QUALITIES = new Set(['320', '192', '128']);
 const CONTENT_TYPES = new Set(['video', 'post', 'carousel']);
 const IMAGE_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp']);
-let activeDownloads = 0;
-
-class AppError extends Error {
-  constructor(statusCode, message) {
-    super(message);
-    this.statusCode = statusCode;
-  }
-}
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const MEDIA_HANDLERS = { '/api/info': mediaInfo, '/api/download': downloadMedia };
 
 function validateMediaUrl(value) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -65,6 +59,9 @@ function validateMediaUrl(value) {
 
   if (parsed.protocol !== 'https:') {
     throw new AppError(400, 'Only HTTPS links are supported.');
+  }
+  if (parsed.username || parsed.password || parsed.port) {
+    throw new AppError(400, 'Use a public HTTPS link without credentials or a custom port.');
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
@@ -111,9 +108,9 @@ function downloadOptions(format, quality, outputTemplate) {
       audioQuality: `${quality}K`,
       format: 'bestaudio/best',
       output: outputTemplate,
-      ffmpegLocation: ffmpegPath,
       maxFilesize: MAX_FILE_SIZE,
       noPlaylist: true,
+      playlistEnd: 1,
       noProgress: true,
       noWarnings: true,
       quiet: true,
@@ -140,108 +137,15 @@ function downloadOptions(format, quality, outputTemplate) {
     mergeOutputFormat: format,
     remuxVideo: format,
     output: outputTemplate,
-    ffmpegLocation: ffmpegPath,
     maxFilesize: MAX_FILE_SIZE,
     noPlaylist: true,
+    playlistEnd: 1,
     noProgress: true,
     noWarnings: true,
     quiet: true,
     retries: 2,
     socketTimeout: 20
   };
-}
-
-function imageDownloadOptions(format, contentType, outputTemplate) {
-  const convertedFormat = imageExtension(format);
-  if (contentType !== 'post' && contentType !== 'carousel') {
-    throw new AppError(400, 'Image downloads require a post or carousel media type.');
-  }
-
-  const options = {
-    skipDownload: true,
-    writeThumbnail: true,
-    convertThumbnails: convertedFormat,
-    output: outputTemplate,
-    ffmpegLocation: ffmpegPath,
-    noProgress: true,
-    noWarnings: true,
-    quiet: true,
-    retries: 2,
-    socketTimeout: 20
-  };
-
-  if (contentType === 'carousel') {
-    options.yesPlaylist = true;
-    options.playlistEnd = 20;
-  } else {
-    options.noPlaylist = true;
-  }
-  return options;
-}
-
-function runYtDlp(url, flags, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(YT_DLP_PATH, [url, ...youtubeDlPackage.args(flags)], {
-      shell: false,
-      windowsHide: true
-    });
-    const stdout = [];
-    const stderr = [];
-    let stdoutSize = 0;
-    let stderrSize = 0;
-    let outputExceeded = false;
-    let timedOut = false;
-    const stdoutLimit = flags.dumpSingleJson ? 16 * 1024 * 1024 : 1024 * 1024;
-    const stderrLimit = 2 * 1024 * 1024;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk) => {
-      stdoutSize += chunk.length;
-      if (stdoutSize > stdoutLimit) {
-        outputExceeded = true;
-        child.kill();
-        return;
-      }
-      stdout.push(chunk);
-    });
-
-    child.stderr.on('data', (chunk) => {
-      stderrSize += chunk.length;
-      if (stderrSize <= stderrLimit) stderr.push(chunk);
-    });
-
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-
-    child.on('close', (exitCode) => {
-      clearTimeout(timeout);
-      const stderrText = Buffer.concat(stderr).toString('utf8').trim();
-      if (timedOut) {
-        reject(Object.assign(new Error('Media extraction timed out.'), { stderr: stderrText }));
-        return;
-      }
-      if (outputExceeded) {
-        reject(Object.assign(new Error('Media extractor output was too large.'), { stderr: stderrText }));
-        return;
-      }
-      if (exitCode !== 0) {
-        reject(Object.assign(new Error(stderrText || 'Media extraction failed.'), { stderr: stderrText }));
-        return;
-      }
-
-      const stdoutText = Buffer.concat(stdout).toString('utf8').trim();
-      try {
-        resolve(flags.dumpSingleJson ? JSON.parse(stdoutText) : stdoutText);
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
 }
 
 function sendJson(response, statusCode, payload) {
@@ -255,6 +159,11 @@ function sendJson(response, statusCode, payload) {
 }
 
 function readJson(request) {
+  const contentType = request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase();
+  if (contentType !== 'application/json') {
+    throw new AppError(415, 'Send an application/json request body.');
+  }
+
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -263,27 +172,45 @@ function readJson(request) {
     request.on('data', (chunk) => {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        tooLarge = true;
+        if (!tooLarge) {
+          tooLarge = true;
+          reject(new AppError(413, 'Request is too large.'));
+        }
         return;
       }
       chunks.push(chunk);
     });
 
     request.on('end', () => {
-      if (tooLarge) {
-        reject(new AppError(413, 'Request is too large.'));
-        return;
-      }
-
+      if (tooLarge) return;
+      let body;
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
       } catch {
         reject(new AppError(400, 'Request body must be valid JSON.'));
+        return;
       }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        reject(new AppError(400, 'Request body must be a JSON object.'));
+        return;
+      }
+      resolve(body);
     });
 
     request.on('error', reject);
   });
+}
+
+function requireSameOrigin(request) {
+  const { host, origin, 'sec-fetch-site': fetchSite } = request.headers;
+  const localOrigin = URL.canParse(`http://${host}`) ? new URL(`http://${host}`) : null;
+  const configuredHost = HOST.includes(':') && !HOST.startsWith('[') ? `[${HOST}]` : HOST;
+  if (!host || !localOrigin || localOrigin.host !== host.toLowerCase().replace(/:80$/, '')
+      || (!LOCAL_HOSTS.has(localOrigin.hostname) && localOrigin.hostname !== configuredHost.toLowerCase())
+      || fetchSite === 'cross-site' || fetchSite === 'same-site'
+      || (origin && origin !== localOrigin.origin)) {
+    throw new AppError(403, 'This request must come from the Social Ripper page.');
+  }
 }
 
 function safeText(value, fallback = '', maxLength = 180) {
@@ -313,8 +240,10 @@ function safeFilename(value) {
 }
 
 function downloaderMessage(error) {
-  const detail = `${error?.stderr || ''} ${error?.message || ''}`.toLowerCase();
-  if (detail.includes('unsupported url')) return 'This link is not supported by the media extractor.';
+  const detail = error.message.toLowerCase();
+  if (detail.includes('unsupported url') || detail.includes('no suitable extractor')) {
+    return 'This link is not supported by the media extractor.';
+  }
   if (detail.includes('private') || detail.includes('login') || detail.includes('sign in')) {
     return 'This media is private or requires an account. Only public links can be downloaded.';
   }
@@ -325,6 +254,16 @@ function downloaderMessage(error) {
     return 'This file is larger than the 250 MB download limit.';
   }
   return 'Could not process this link. The site may have changed or blocked the request.';
+}
+
+async function extractMedia(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof AppError || error.name === 'AbortError') throw error;
+    const message = downloaderMessage(error);
+    throw new AppError(message.includes('250 MB') ? 413 : 422, message);
+  }
 }
 
 async function serveStatic(response, pathname) {
@@ -346,199 +285,196 @@ async function serveStatic(response, pathname) {
   return true;
 }
 
-async function mediaInfo(request, response) {
-  const body = await readJson(request);
-  const url = validateMediaUrl(body.url);
-  const contentType = normalizeContentType(body.contentType);
-
-  let output;
-  try {
-    const options = {
-      dumpSingleJson: true,
-      noWarnings: true,
-      quiet: true,
-      retries: 1,
-      socketTimeout: 15
-    };
-    if (contentType === 'carousel') {
-      options.yesPlaylist = true;
-      options.playlistEnd = 20;
-    } else {
-      options.noPlaylist = true;
-    }
-    output = await runYtDlp(url, options, 60 * 1000);
-  } catch (error) {
-    throw new AppError(422, downloaderMessage(error));
-  }
-
-  const entries = Array.isArray(output.entries) ? output.entries.filter(Boolean) : [];
-  const info = contentType === 'carousel' && entries.length ? entries[0] : output;
+async function inspectVideo(tools, url, signal) {
+  const options = {
+    dumpSingleJson: true,
+    noWarnings: true,
+    quiet: true,
+    retries: 1,
+    socketTimeout: 15,
+    noPlaylist: true,
+    playlistEnd: 1
+  };
+  const { output } = await runYtDlp(tools, url, options, { signal, timeoutMs: 60_000 });
+  const info = parseToolJson(output, (data) => data && typeof data === 'object' && !Array.isArray(data));
+  if (Array.isArray(info.entries)) throw new AppError(422, 'Use a link to an individual video.');
   const thumbnailData = Array.isArray(info.thumbnails)
     ? [...info.thumbnails].reverse().find((thumbnail) => safeThumbnail(thumbnail?.url))
     : null;
-  const width = Number(info.width || thumbnailData?.width);
-  const height = Number(info.height || thumbnailData?.height);
+  return {
+    title: info.title,
+    uploader: info.uploader || info.channel,
+    platform: info.extractor_key || info.extractor,
+    duration: info.duration,
+    thumbnail: safeThumbnail(info.thumbnail) || safeThumbnail(thumbnailData?.url),
+    width: info.width || thumbnailData?.width,
+    height: info.height || thumbnailData?.height,
+    itemCount: 1
+  };
+}
+
+async function mediaInfo(response, { url, contentType, tools, signal }) {
+  const info = await extractMedia(() => contentType === 'video'
+    ? inspectVideo(tools, url, signal)
+    : inspectImages(tools, url, contentType, signal));
+  const width = Number(info.width);
+  const height = Number(info.height);
   sendJson(response, 200, {
-    title: safeText(output.title || info.title, 'Untitled media'),
-    uploader: safeText(output.uploader || output.channel || info.uploader || info.channel, '', 80),
-    platform: safeText(output.extractor_key || output.extractor || info.extractor_key || info.extractor, 'Media', 40),
-    duration: Number.isFinite(Number(info.duration)) ? Number(info.duration) : null,
-    thumbnail: safeThumbnail(info.thumbnail || thumbnailData?.url),
+    title: safeText(info.title, 'Untitled media'),
+    uploader: safeText(info.uploader, '', 80),
+    platform: safeText(info.platform, 'Media', 40),
+    duration: Number.isFinite(info.duration) ? info.duration : null,
+    thumbnail: safeThumbnail(info.thumbnail),
     width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
-    itemCount: contentType === 'carousel' ? Math.max(entries.length, 1) : 1
+    itemCount: info.itemCount
   });
 }
 
-async function downloadMedia(request, response) {
-  if (activeDownloads >= MAX_ACTIVE_DOWNLOADS) {
-    throw new AppError(429, 'Two downloads are already running. Try again in a moment.');
-  }
+async function downloadVideo(tools, url, format, quality, directory, signal) {
+  const template = path.join(directory, 'media.%(ext)s');
+  const options = downloadOptions(format, quality, template);
+  options.ffmpegLocation = await requireTool(tools, 'ffmpeg');
+  const { diagnostic } = await runYtDlp(tools, url, options, {
+    signal, directory, timeoutMs: 10 * 60_000
+  });
+  await checkFileBudget(directory);
 
-  activeDownloads += 1;
-  let tempDirectory = '';
+  const name = 'media.' + format;
+  const filePath = path.join(directory, name);
+  const stats = await fsp.lstat(filePath).catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  if (!stats?.isFile() || !stats.size) {
+    if (diagnostic) throw new Error(diagnostic);
+    throw new AppError(422, 'The media extractor did not create the requested file.');
+  }
+  return [{ name, filePath, stats }];
+}
+
+async function streamCarousel(response, files, baseName, format, signal) {
+  const { ZipArchive } = await import('archiver');
+  signal.throwIfAborted();
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  archive.on('warning', (error) => archive.destroy(error));
+
+  response.writeHead(200, {
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="${baseName}-${format}-carousel.zip"`,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff'
+  });
 
   try {
-    const body = await readJson(request);
-    const url = validateMediaUrl(body.url);
-    const contentType = normalizeContentType(body.contentType);
-    const format = typeof body.format === 'string' ? body.format.toLowerCase() : '';
-    const quality = typeof body.quality === 'string' ? body.quality.toLowerCase() : '';
-    tempDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'social-ripper-'));
-    const isImageDownload = contentType !== 'video';
-    const outputTemplate = path.join(
-      tempDirectory,
-      isImageDownload ? 'image-%(autonumber)03d.%(ext)s' : 'media.%(ext)s'
-    );
-    const options = isImageDownload
-      ? imageDownloadOptions(format, contentType, outputTemplate)
-      : downloadOptions(format, quality, outputTemplate);
+    files.forEach((file, index) => {
+      const number = String(index + 1).padStart(2, '0');
+      archive.file(file.filePath, { name: `${number}.${format}` });
+    });
+    await Promise.all([
+      pipeline(archive, response, { signal }),
+      archive.finalize()
+    ]);
+  } finally {
+    archive.abort();
+  }
+}
 
-    try {
-      await runYtDlp(url, options, 10 * 60 * 1000);
-    } catch (error) {
-      throw new AppError(422, downloaderMessage(error));
-    }
+async function downloadMedia(response, { body, url, contentType, tools, signal }) {
+  const format = typeof body.format === 'string' ? body.format.toLowerCase() : '';
+  const quality = typeof body.quality === 'string' ? body.quality.toLowerCase() : '';
+  const extension = contentType === 'video' ? format : imageExtension(format);
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'social-ripper-'));
 
-    const entries = await fsp.readdir(tempDirectory, { withFileTypes: true });
-    const convertedExtension = isImageDownload ? imageExtension(format) : '';
-    const outputs = entries.filter(
-      (entry) => entry.isFile()
-        && !entry.name.endsWith('.part')
-        && !entry.name.endsWith('.ytdl')
-        && (!isImageDownload || path.extname(entry.name).slice(1).toLowerCase() === convertedExtension)
-    );
-    if (!outputs.length) {
-      const message = isImageDownload
-        ? 'No downloadable images were found in this post.'
-        : 'The media extractor did not create a file.';
-      throw new AppError(422, message);
-    }
-
-    const files = await Promise.all(outputs.map(async (output) => {
-      const filePath = path.join(tempDirectory, output.name);
-      return { filePath, name: output.name, stats: await fsp.stat(filePath) };
-    }));
-    const totalSize = files.reduce((total, file) => total + file.stats.size, 0);
-    if (totalSize > MAX_FILE_BYTES) {
-      throw new AppError(413, 'This file is larger than the 250 MB download limit.');
-    }
+  try {
+    const files = await extractMedia(() => contentType === 'video'
+      ? downloadVideo(tools, url, format, quality, directory, signal)
+      : downloadImages(tools, url, contentType, extension, { directory, signal }));
+    signal.throwIfAborted();
 
     const baseName = safeFilename(body.title);
     if (contentType === 'carousel') {
-      const { ZipArchive } = await import('archiver');
-      const archive = new ZipArchive({ zlib: { level: 9 } });
-      const cleanup = () => fsp.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
-
-      response.writeHead(200, {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${baseName}-${format}-carousel.zip"`,
-        'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff'
-      });
-
-      archive.on('warning', (error) => {
-        if (error.code !== 'ENOENT') response.destroy(error);
-      });
-      archive.on('error', (error) => response.destroy(error));
-      response.on('close', () => {
-        archive.abort();
-        cleanup();
-      });
-      archive.pipe(response);
-      files
-        .sort((first, second) => first.name.localeCompare(second.name))
-        .forEach((file, index) => {
-          const number = String(index + 1).padStart(2, '0');
-          archive.file(file.filePath, { name: `${number}.${format}` });
-        });
-      await archive.finalize();
+      await streamCarousel(response, files, baseName, format, signal);
       return;
     }
 
-    const output = files[0];
-    const extension = isImageDownload
-      ? format
-      : path.extname(output.name).slice(1).toLowerCase() || format;
+    const [output] = files;
     const contentTypes = {
       jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
       png: 'image/png',
       webp: 'image/webp',
       mp3: 'audio/mpeg',
       mp4: 'video/mp4',
-      webm: 'video/webm',
-      m4a: 'audio/mp4'
+      webm: 'video/webm'
     };
-    const downloadName = `${baseName}.${extension}`;
+    const downloadName = `${baseName}.${format}`;
 
     response.writeHead(200, {
-      'Content-Type': contentTypes[extension] || 'application/octet-stream',
+      'Content-Type': contentTypes[extension],
       'Content-Length': output.stats.size,
       'Content-Disposition': `attachment; filename="${downloadName}"`,
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff'
     });
-
-    const stream = fs.createReadStream(output.filePath);
-    const cleanup = () => fsp.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
-    stream.on('error', () => response.destroy());
-    stream.on('close', cleanup);
-    response.on('close', () => stream.destroy());
-    stream.pipe(response);
-  } catch (error) {
-    if (tempDirectory) {
-      await fsp.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
-    }
-    throw error;
+    await pipeline(fs.createReadStream(output.filePath), response, { signal });
   } finally {
-    activeDownloads -= 1;
+    await fsp.rm(directory, { recursive: true, force: true, maxRetries: 3 }).catch((error) => {
+      console.error('Could not clean up temporary media:', error.message);
+    });
   }
 }
 
-function createServer() {
+async function mediaHealth(tools) {
+  const entries = await Promise.all(Object.entries(tools).map(async ([name, candidates]) => [
+    name, await findExecutable(candidates) !== null
+  ]));
+  return Object.fromEntries(entries);
+}
+
+function createServer({ tools = getMediaTools() } = {}) {
+  let activeJobs = 0;
   const server = http.createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url, 'http://localhost');
 
       if (request.method === 'GET' && requestUrl.pathname === '/api/health') {
-        sendJson(response, 200, { status: 'ok' });
+        const available = await mediaHealth(tools);
+        const ready = available['yt-dlp'] && available.ffmpeg;
+        sendJson(response, ready ? 200 : 503, {
+          status: ready ? 'ok' : 'unavailable',
+          tools: available
+        });
         return;
       }
 
-      if (request.method === 'POST' && requestUrl.pathname === '/api/info') {
-        await mediaInfo(request, response);
-        return;
-      }
+      if (request.method === 'POST' && Object.hasOwn(MEDIA_HANDLERS, requestUrl.pathname)) {
+        requireSameOrigin(request);
+        const body = await readJson(request);
+        const url = validateMediaUrl(body.url);
+        const contentType = normalizeContentType(body.contentType);
+        if (response.destroyed || response.socket?.destroyed) return;
 
-      if (request.method === 'POST' && requestUrl.pathname === '/api/download') {
-        await downloadMedia(request, response);
+        if (activeJobs >= MAX_ACTIVE_JOBS) {
+          throw new AppError(429, 'Two media jobs are already running. Try again in a moment.');
+        }
+        const controller = new AbortController();
+        const abort = () => {
+          if (!response.writableFinished) controller.abort();
+        };
+        response.once('close', abort);
+        activeJobs += 1;
+        try {
+          await MEDIA_HANDLERS[requestUrl.pathname](response, { body, url, contentType, tools, signal: controller.signal });
+        } finally {
+          activeJobs -= 1;
+          response.removeListener('close', abort);
+        }
         return;
       }
 
       if (request.method === 'GET' && await serveStatic(response, requestUrl.pathname)) return;
       sendJson(response, 404, { error: 'Not found.' });
     } catch (error) {
+      if (response.destroyed) return;
       if (response.headersSent) {
         response.destroy();
         return;
@@ -551,8 +487,8 @@ function createServer() {
     }
   });
 
-  server.requestTimeout = 10 * 60 * 1000;
-  server.headersTimeout = 30 * 1000;
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 30_000;
   return server;
 }
 
@@ -563,4 +499,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createServer, downloadOptions, imageDownloadOptions, validateMediaUrl };
+module.exports = { createServer, downloadOptions, validateMediaUrl };
