@@ -30,7 +30,7 @@
 
 ## What is Social Ripper?
 
-**Social Ripper** is a minimal, local-first utility for saving public reels, videos, audio tracks, photos, and multi-image carousels directly from your browser or mobile share sheet. No accounts, no third-party uploads, and no artificial file-size caps—just paste or share a link, inspect the preview, and stream the file straight to your device.
+**Social Ripper** is a minimal, local-first utility for saving public reels, videos, audio tracks, photos, and multi-image carousels directly from your browser or mobile share sheet. No accounts, no third-party uploads, and no artificial file-size caps just paste or share a link, inspect the preview, and stream the file straight to your device.
 
 > **Download only media you own or have permission to save.** Platform restrictions still apply.
 
