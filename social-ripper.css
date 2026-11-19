@@ -153,6 +153,32 @@ svg {
   border-left: 1px solid var(--ink);
 }
 
+.masthead-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  color: var(--ink);
+  border-left: 1px solid var(--ink);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.masthead-link svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.masthead-link:hover {
+  color: var(--white);
+  background: var(--ink);
+}
+
+.masthead-link:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: -3px;
+}
+
 .install-nav-button {
   display: flex;
   align-items: center;
@@ -929,18 +955,139 @@ h1 span:last-child {
   letter-spacing: 0.05em;
 }
 
+.support-rail {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  border-bottom: 2px solid var(--ink);
+}
+
+.support-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--ink);
+}
+
+.support-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 76px;
+  padding: 14px 20px;
+  background: var(--panel);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.support-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ink);
+  background: var(--white);
+  color: var(--ink);
+}
+
+.support-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.support-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.support-copy strong {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.support-copy small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.support-arrow {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.support-card.is-kofi:hover {
+  color: var(--white);
+  background: var(--orange);
+}
+
+.support-card.is-kofi:hover small {
+  color: var(--ink);
+}
+
+.support-card.is-bmc:hover {
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.support-card.is-bmc:hover small {
+  color: var(--ink);
+}
+
+.support-card.is-github:hover {
+  color: var(--white);
+  background: var(--ink);
+}
+
+.support-card.is-github:hover small {
+  color: #b8b7af;
+}
+
+.support-card:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: -3px;
+}
+
 footer {
   display: flex;
+  flex-wrap: wrap;
   min-height: 76px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  gap: 12px 24px;
+  padding: 16px 24px;
   color: #b8b7af;
   background: var(--ink);
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
+
+.footer-links a {
+  color: var(--white);
+  border-bottom: 1px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.footer-links a:hover {
+  color: var(--yellow);
+  border-bottom-color: var(--yellow);
 }
 
 .install-popup {
@@ -1096,8 +1243,13 @@ footer {
     border-bottom: 2px solid var(--ink);
   }
 
-  .service-rail {
+  .service-rail,
+  .support-rail {
     grid-template-columns: 160px 1fr;
+  }
+
+  .support-links {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .platform-list {
@@ -1138,7 +1290,7 @@ footer {
     font-size: 9px;
   }
 
-  .masthead-meta > span:first-child {
+  .masthead-link {
     display: none;
   }
 
@@ -1239,7 +1391,12 @@ footer {
     width: 100%;
   }
 
-  .service-rail {
+  .service-rail,
+  .support-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .support-links {
     grid-template-columns: 1fr;
   }
 
@@ -1269,7 +1426,8 @@ footer {
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
-    gap: 7px;
+    padding: 20px 16px;
+    gap: 10px;
   }
 }
 

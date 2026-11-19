@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="#what-is-social-ripper">
+  <a href="https://socialripper.space">
     <img src="docs/images/logo.png" alt="Social Ripper Logo" width="140">
   </a>
 </p>
@@ -11,11 +11,12 @@
 </p>
 
 <p align="center">
+  <a href="https://socialripper.space">Website</a> -
+  <a href="#support">Donate</a> -
   <a href="#features">Features</a> -
   <a href="#what-is-social-ripper">Preview</a> -
   <a href="#mobile--pwa">PWA &amp; Share</a> -
   <a href="#self-hosting">Self-Hosting</a> -
-  <a href="#usage">Usage</a> -
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
@@ -28,6 +29,18 @@
   </a>
   <a href="https://github.com/Dipak-Chauhan/social-ripper/issues">
     <img src="https://img.shields.io/github/issues/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub issues">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://socialripper.space">
+    <img src="https://img.shields.io/badge/Live%20App-socialripper.space-f04b23?style=for-the-badge&logo=vercel&logoColor=fffef8&labelColor=11110f" alt="Live App on Vercel">
+  </a>
+  <a href="https://ko-fi.com/dipakchauhan">
+    <img src="https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=fffef8&labelColor=11110f" alt="Support on Ko-fi">
+  </a>
+  <a href="https://buymeacoffee.com/dipakchauhan">
+    <img src="https://img.shields.io/badge/Buy%20Me%20a-Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=FFDD00&labelColor=11110f" alt="Buy Me a Coffee">
   </a>
 </p>
 
@@ -106,6 +119,10 @@
 ---
 
 ## Usage
+
+### Live Instance
+
+Try the hosted PWA directly at **[socialripper.space](https://socialripper.space)**.
 
 ### Desktop & Mobile Browser
 
@@ -229,6 +246,21 @@ Test with `nginx -t` before reloading ([Nginx proxy docs](https://nginx.org/en/d
 | HTTP 403 on LAN or behind a reverse proxy | Bind `HOST=0.0.0.0` for direct LAN IP access; behind a reverse proxy set `ALLOWED_HOSTS=<hostname>` or verify upstream `Host` and `Origin` headers. |
 | HTTP 404 when saving a file | One-time `/api/downloads/:token` links expire after single use or `PENDING_DOWNLOAD_TTL_MS`. Click **Download** again. |
 | HTTP 429 | Both shared job slots are active, or the reverse proxy's rate limit was reached. Wait briefly and retry. |
+
+---
+
+## Support
+
+Social Ripper is free and open-source with zero ads or tracking. If it saves you time, consider supporting hosting and ongoing maintenance:
+
+<p align="center">
+  <a href="https://ko-fi.com/dipakchauhan">
+    <img src="https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=fffef8&labelColor=11110f" alt="Support on Ko-fi">
+  </a>
+  <a href="https://buymeacoffee.com/dipakchauhan">
+    <img src="https://img.shields.io/badge/Buy%20Me%20a-Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=FFDD00&labelColor=11110f" alt="Buy Me a Coffee">
+  </a>
+</p>
 
 ---
 
