@@ -1,7 +1,5 @@
 <p align="center">
-  <a href="https://socialripper.space">
-    <img src="docs/images/logo.png" alt="Social Ripper Logo" width="140">
-  </a>
+  <a href="https://socialripper.space"><img src="docs/images/logo.png" alt="Social Ripper Logo" width="140"></a>
 </p>
 
 <h1 align="center">Social Ripper</h1>
@@ -21,27 +19,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Dipak-Chauhan/social-ripper/stargazers">
-    <img src="https://img.shields.io/github/stars/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub stars">
-  </a>
-  <a href="https://github.com/Dipak-Chauhan/social-ripper/network/members">
-    <img src="https://img.shields.io/github/forks/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub forks">
-  </a>
-  <a href="https://github.com/Dipak-Chauhan/social-ripper/issues">
-    <img src="https://img.shields.io/github/issues/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub issues">
-  </a>
+  <a href="https://github.com/Dipak-Chauhan/SocialRipper/stargazers"><img src="https://img.shields.io/github/stars/Dipak-Chauhan/SocialRipper?style=for-the-badge&color=fffef8&labelColor=1f2328" alt="GitHub stars"></a>&nbsp;<a href="https://github.com/Dipak-Chauhan/SocialRipper/network/members"><img src="https://img.shields.io/github/forks/Dipak-Chauhan/SocialRipper?style=for-the-badge&color=fffef8&labelColor=1f2328" alt="GitHub forks"></a>&nbsp;<a href="https://github.com/Dipak-Chauhan/SocialRipper/issues"><img src="https://img.shields.io/github/issues/Dipak-Chauhan/SocialRipper?style=for-the-badge&color=fffef8&labelColor=1f2328" alt="GitHub issues"></a>
 </p>
 
 <p align="center">
-  <a href="https://socialripper.space">
-    <img src="https://img.shields.io/badge/Live%20App-socialripper.space-f04b23?style=for-the-badge&logo=vercel&logoColor=fffef8&labelColor=11110f" alt="Live App on Vercel">
-  </a>
-  <a href="https://ko-fi.com/dipakchauhan">
-    <img src="https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=fffef8&labelColor=11110f" alt="Support on Ko-fi">
-  </a>
-  <a href="https://buymeacoffee.com/dipakchauhan">
-    <img src="https://img.shields.io/badge/Buy%20Me%20a-Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=FFDD00&labelColor=11110f" alt="Buy Me a Coffee">
-  </a>
+  <a href="https://ko-fi.com/dipakchauhan"><img src="docs/images/donate-kofi.svg" alt="Support on Ko-fi" height="40"></a>&nbsp;&nbsp;<a href="https://buymeacoffee.com/dipakchauhan"><img src="docs/images/donate-bmc.svg" alt="Buy Me a Coffee" height="40"></a>
 </p>
 
 ---
@@ -150,8 +132,8 @@ Try the hosted PWA directly at **[socialripper.space](https://socialripper.space
 ### Local Installation
 
 ```bash
-git clone https://github.com/Dipak-Chauhan/social-ripper.git
-cd social-ripper
+git clone https://github.com/Dipak-Chauhan/SocialRipper.git
+cd SocialRipper
 npm ci
 npm start
 ```
@@ -254,12 +236,7 @@ Test with `nginx -t` before reloading ([Nginx proxy docs](https://nginx.org/en/d
 Social Ripper is free and open-source with zero ads or tracking. If it saves you time, consider supporting hosting and ongoing maintenance:
 
 <p align="center">
-  <a href="https://ko-fi.com/dipakchauhan">
-    <img src="https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=fffef8&labelColor=11110f" alt="Support on Ko-fi">
-  </a>
-  <a href="https://buymeacoffee.com/dipakchauhan">
-    <img src="https://img.shields.io/badge/Buy%20Me%20a-Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=FFDD00&labelColor=11110f" alt="Buy Me a Coffee">
-  </a>
+  <a href="https://ko-fi.com/dipakchauhan"><img src="docs/images/donate-kofi.svg" alt="Support on Ko-fi" height="40"></a>&nbsp;&nbsp;<a href="https://buymeacoffee.com/dipakchauhan"><img src="docs/images/donate-bmc.svg" alt="Buy Me a Coffee" height="40"></a>
 </p>
 
 ---
@@ -270,10 +247,10 @@ Social Ripper is free and open-source with zero ads or tracking. If it saves you
 
 ## Star History
 
-<a href="https://www.star-history.com/#Dipak-Chauhan/social-ripper&type=date&logscale&legend=top-left">
+<a href="https://www.star-history.com/#Dipak-Chauhan/SocialRipper&type=date&logscale&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Dipak-Chauhan/social-ripper&type=date&theme=dark&logscale&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Dipak-Chauhan/social-ripper&type=date&theme=light&logscale&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Dipak-Chauhan/social-ripper&type=date&theme=light&logscale&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Dipak-Chauhan/SocialRipper&type=date&theme=dark&logscale&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Dipak-Chauhan/SocialRipper&type=date&theme=light&logscale&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Dipak-Chauhan/SocialRipper&type=date&theme=light&logscale&legend=top-left" />
  </picture>
 </a>

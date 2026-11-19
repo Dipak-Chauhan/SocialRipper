@@ -136,7 +136,7 @@ test('server serves the app, PWA assets, share target, and validates API input',
   const html = await pageResponse.text();
   assert.match(html, /Social Ripper/);
   assert.match(html, /rel="manifest"/);
-  assert.match(html, /href="https:\/\/github\.com\/Dipak-Chauhan\/social-ripper"[^>]*rel="noopener noreferrer"/);
+  assert.match(html, /href="https:\/\/github\.com\/Dipak-Chauhan\/SocialRipper"[^>]*rel="noopener noreferrer"/);
   assert.match(html, /href="https:\/\/ko-fi\.com\/dipakchauhan"[^>]*rel="noopener noreferrer"/);
   assert.match(html, /href="https:\/\/buymeacoffee\.com\/dipakchauhan"[^>]*rel="noopener noreferrer"/);
 
