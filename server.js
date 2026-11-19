@@ -1,19 +1,49 @@
-const http = require('node:http');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const http = require('node:http');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
 const {
-  AppError, checkFileBudget, downloadImages, findExecutable, getMediaTools,
+  AppError, downloadImages, findExecutable, getMediaTools,
   inspectImages, parseToolJson, requireTool, runYtDlp
 } = require('./media-tools');
 
-const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+function parsePort(value, fallback = 3000) {
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) throw new RangeError(`Invalid port: ${value}`);
+  const port = Number.parseInt(raw, 10);
+  if (port < 0 || port > 65535) throw new RangeError(`Port out of range: ${value}`);
+  return port;
+}
+
+function parsePositiveInt(value, fallback) {
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return parsed > 0 ? parsed : fallback;
+}
+
+function parseAllowedHosts(value = '') {
+  return new Set(
+    String(value)
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase().replace(/\.$/, ''))
+      .filter(Boolean)
+  );
+}
+
+const PORT = parsePort(process.env.PORT, 3000);
 const HOST = process.env.HOST || '127.0.0.1';
+const DEFAULT_ALLOWED_HOSTS = parseAllowedHosts(process.env.ALLOWED_HOSTS);
+const DOWNLOAD_TIMEOUT_MS = parsePositiveInt(process.env.DOWNLOAD_TIMEOUT_MS, 60 * 60_000);
+const PENDING_DOWNLOAD_TTL_MS = parsePositiveInt(process.env.PENDING_DOWNLOAD_TTL_MS, 60_000);
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_ACTIVE_JOBS = 2;
-const MAX_FILE_SIZE = '250M';
 
 const SUPPORTED_DOMAINS = [
   'instagram.com',
@@ -25,8 +55,10 @@ const SUPPORTED_DOMAINS = [
   'x.com',
   'twitter.com',
   'threads.net',
+  'threads.com',
   'vimeo.com',
   'reddit.com',
+  'redd.it',
   'pinterest.com',
   'pin.it'
 ];
@@ -34,16 +66,24 @@ const SUPPORTED_DOMAINS = [
 const STATIC_FILES = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
+  ['/share-target', ['index.html', 'text/html; charset=utf-8']],
   ['/social-ripper.css', ['social-ripper.css', 'text/css; charset=utf-8']],
-  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']]
+  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json; charset=utf-8']],
+  ['/sw.js', ['sw.js', 'text/javascript; charset=utf-8']],
+  ['/icons/icon-192.png', ['icons/icon-192.png', 'image/png']],
+  ['/icons/icon-512.png', ['icons/icon-512.png', 'image/png']],
+  ['/icons/icon-maskable-512.png', ['icons/icon-maskable-512.png', 'image/png']],
+  ['/icons/apple-touch-icon.png', ['icons/apple-touch-icon.png', 'image/png']]
 ]);
+const NO_CACHE_PATHS = new Set(['/', '/index.html', '/share-target', '/sw.js', '/manifest.webmanifest']);
 
 const VIDEO_QUALITIES = new Set(['best', '1080', '720', '480']);
 const AUDIO_QUALITIES = new Set(['320', '192', '128']);
 const CONTENT_TYPES = new Set(['video', 'post', 'carousel']);
 const IMAGE_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-const MEDIA_HANDLERS = { '/api/info': mediaInfo, '/api/download': downloadMedia };
+const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', '[::]']);
 
 function validateMediaUrl(value) {
   if (typeof value !== 'string' || !value.trim()) {
@@ -108,7 +148,6 @@ function downloadOptions(format, quality, outputTemplate) {
       audioQuality: `${quality}K`,
       format: 'bestaudio/best',
       output: outputTemplate,
-      maxFilesize: MAX_FILE_SIZE,
       noPlaylist: true,
       playlistEnd: 1,
       noProgress: true,
@@ -134,10 +173,9 @@ function downloadOptions(format, quality, outputTemplate) {
 
   return {
     format: selector,
-    mergeOutputFormat: format,
-    remuxVideo: format,
+    mergeOutputFormat: `${format}/mkv`,
+    recodeVideo: format,
     output: outputTemplate,
-    maxFilesize: MAX_FILE_SIZE,
     noPlaylist: true,
     playlistEnd: 1,
     noProgress: true,
@@ -201,14 +239,31 @@ function readJson(request) {
   });
 }
 
-function requireSameOrigin(request) {
+function requireSameOrigin(request, { boundHost = HOST, allowedHosts = DEFAULT_ALLOWED_HOSTS } = {}) {
   const { host, origin, 'sec-fetch-site': fetchSite } = request.headers;
-  const localOrigin = URL.canParse(`http://${host}`) ? new URL(`http://${host}`) : null;
-  const configuredHost = HOST.includes(':') && !HOST.startsWith('[') ? `[${HOST}]` : HOST;
-  if (!host || !localOrigin || localOrigin.host !== host.toLowerCase().replace(/:80$/, '')
-      || (!LOCAL_HOSTS.has(localOrigin.hostname) && localOrigin.hostname !== configuredHost.toLowerCase())
-      || fetchSite === 'cross-site' || fetchSite === 'same-site'
-      || (origin && origin !== localOrigin.origin)) {
+  const localOrigin = host && URL.canParse(`http://${host}`) ? new URL(`http://${host}`) : null;
+  if (!host || !localOrigin || localOrigin.host !== host.toLowerCase().replace(/:80$/, '')) {
+    throw new AppError(403, 'This request must come from the Social Ripper page.');
+  }
+
+  const hostname = localOrigin.hostname;
+  const normalizedBound = boundHost.trim().toLowerCase();
+  const configuredHost = normalizedBound.includes(':') && !normalizedBound.startsWith('[')
+    ? `[${normalizedBound}]`
+    : normalizedBound;
+  const isWildcard = WILDCARD_HOSTS.has(normalizedBound);
+  const isIpHost = net.isIP(hostname.replace(/^\[|\]$/g, '')) !== 0;
+
+  const isAllowedHost = LOCAL_HOSTS.has(hostname)
+    || (!isWildcard && hostname === configuredHost)
+    || allowedHosts.has(hostname)
+    || (isWildcard && isIpHost);
+
+  const originAllowed = !origin
+    || origin === localOrigin.origin
+    || (allowedHosts.has(hostname) && origin === `https://${localOrigin.host}`);
+
+  if (!isAllowedHost || fetchSite === 'cross-site' || fetchSite === 'same-site' || !originAllowed) {
     throw new AppError(403, 'This request must come from the Social Ripper page.');
   }
 }
@@ -239,6 +294,28 @@ function safeFilename(value) {
   return filename || 'social-media';
 }
 
+function safeUnicodeFilename(value) {
+  const filename = safeText(value, 'social-media', 90)
+    .normalize('NFC')
+    .replace(/[<>:"/\\|?*]/g, '')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  return filename || 'social-media';
+}
+
+function encodeRFC5987(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function contentDisposition(title, extension, suffix = '') {
+  const ascii = `${safeFilename(title)}${suffix}.${extension}`;
+  const unicode = `${safeUnicodeFilename(title)}${suffix}.${extension}`;
+  const header = unicode === ascii
+    ? `attachment; filename="${ascii}"`
+    : `attachment; filename="${ascii}"; filename*=UTF-8''${encodeRFC5987(unicode)}`;
+  return { filename: unicode, header };
+}
+
 function downloaderMessage(error) {
   const detail = error.message.toLowerCase();
   if (detail.includes('unsupported url') || detail.includes('no suitable extractor')) {
@@ -250,9 +327,6 @@ function downloaderMessage(error) {
   if (detail.includes('copyright') || detail.includes('unavailable')) {
     return 'This media is unavailable or restricted by the platform.';
   }
-  if (detail.includes('max-filesize') || detail.includes('larger than max-filesize')) {
-    return 'This file is larger than the 250 MB download limit.';
-  }
   return 'Could not process this link. The site may have changed or blocked the request.';
 }
 
@@ -261,8 +335,7 @@ async function extractMedia(operation) {
     return await operation();
   } catch (error) {
     if (error instanceof AppError || error.name === 'AbortError') throw error;
-    const message = downloaderMessage(error);
-    throw new AppError(message.includes('250 MB') ? 413 : 422, message);
+    throw new AppError(422, downloaderMessage(error));
   }
 }
 
@@ -272,15 +345,19 @@ async function serveStatic(response, pathname) {
 
   const [filename, contentType] = staticFile;
   const contents = await fsp.readFile(path.join(__dirname, filename));
-  response.writeHead(200, {
+  const headers = {
     'Content-Type': contentType,
     'Content-Length': contents.length,
-    'Cache-Control': pathname === '/' || pathname === '/index.html' ? 'no-cache' : 'public, max-age=3600',
-    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    'Cache-Control': NO_CACHE_PATHS.has(pathname) ? 'no-cache' : 'public, max-age=3600',
+    'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY'
-  });
+  };
+  if (pathname === '/sw.js') {
+    headers['Service-Worker-Allowed'] = '/';
+  }
+  response.writeHead(200, headers);
   response.end(contents);
   return true;
 }
@@ -331,14 +408,13 @@ async function mediaInfo(response, { url, contentType, tools, signal }) {
   });
 }
 
-async function downloadVideo(tools, url, format, quality, directory, signal) {
+async function downloadVideo(tools, url, format, quality, directory, signal, timeoutMs) {
   const template = path.join(directory, 'media.%(ext)s');
   const options = downloadOptions(format, quality, template);
   options.ffmpegLocation = await requireTool(tools, 'ffmpeg');
   const { diagnostic } = await runYtDlp(tools, url, options, {
-    signal, directory, timeoutMs: 10 * 60_000
+    signal, timeoutMs
   });
-  await checkFileBudget(directory);
 
   const name = 'media.' + format;
   const filePath = path.join(directory, name);
@@ -352,15 +428,15 @@ async function downloadVideo(tools, url, format, quality, directory, signal) {
   return [{ name, filePath, stats }];
 }
 
-async function streamCarousel(response, files, baseName, format, signal) {
+async function streamCarousel(response, files, dispositionHeader, extension, signal) {
   const { ZipArchive } = await import('archiver');
   signal.throwIfAborted();
-  const archive = new ZipArchive({ zlib: { level: 9 } });
+  const archive = new ZipArchive({ store: true });
   archive.on('warning', (error) => archive.destroy(error));
 
   response.writeHead(200, {
     'Content-Type': 'application/zip',
-    'Content-Disposition': `attachment; filename="${baseName}-${format}-carousel.zip"`,
+    'Content-Disposition': dispositionHeader,
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff'
   });
@@ -368,7 +444,7 @@ async function streamCarousel(response, files, baseName, format, signal) {
   try {
     files.forEach((file, index) => {
       const number = String(index + 1).padStart(2, '0');
-      archive.file(file.filePath, { name: `${number}.${format}` });
+      archive.file(file.filePath, { name: `${number}.${extension}` });
     });
     await Promise.all([
       pipeline(archive, response, { signal }),
@@ -379,48 +455,64 @@ async function streamCarousel(response, files, baseName, format, signal) {
   }
 }
 
-async function downloadMedia(response, { body, url, contentType, tools, signal }) {
+async function prepareDownload({ body, url, contentType, tools, signal, downloadTimeoutMs, removeDirectory }) {
   const format = typeof body.format === 'string' ? body.format.toLowerCase() : '';
   const quality = typeof body.quality === 'string' ? body.quality.toLowerCase() : '';
   const extension = contentType === 'video' ? format : imageExtension(format);
-  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'social-ripper-'));
+  if (contentType === 'video') {
+    downloadOptions(format, quality, 'validate.%(ext)s');
+  }
 
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'social-ripper-'));
   try {
     const files = await extractMedia(() => contentType === 'video'
-      ? downloadVideo(tools, url, format, quality, directory, signal)
-      : downloadImages(tools, url, contentType, extension, { directory, signal }));
+      ? downloadVideo(tools, url, format, quality, directory, signal, downloadTimeoutMs)
+      : downloadImages(tools, url, contentType, extension, { directory, signal, timeoutMs: downloadTimeoutMs }));
     signal.throwIfAborted();
 
-    const baseName = safeFilename(body.title);
-    if (contentType === 'carousel') {
-      await streamCarousel(response, files, baseName, format, signal);
-      return;
-    }
+    const disposition = contentType === 'carousel'
+      ? contentDisposition(body.title, 'zip', `-${extension}-carousel`)
+      : contentDisposition(body.title, extension);
 
-    const [output] = files;
-    const contentTypes = {
-      jpg: 'image/jpeg',
-      png: 'image/png',
-      webp: 'image/webp',
-      mp3: 'audio/mpeg',
-      mp4: 'video/mp4',
-      webm: 'video/webm'
+    return {
+      directory,
+      files,
+      contentType,
+      extension,
+      filename: disposition.filename,
+      dispositionHeader: disposition.header,
+      size: contentType === 'carousel' ? null : files[0].stats.size
     };
-    const downloadName = `${baseName}.${format}`;
-
-    response.writeHead(200, {
-      'Content-Type': contentTypes[extension],
-      'Content-Length': output.stats.size,
-      'Content-Disposition': `attachment; filename="${downloadName}"`,
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff'
-    });
-    await pipeline(fs.createReadStream(output.filePath), response, { signal });
-  } finally {
-    await fsp.rm(directory, { recursive: true, force: true, maxRetries: 3 }).catch((error) => {
-      console.error('Could not clean up temporary media:', error.message);
-    });
+  } catch (error) {
+    await removeDirectory(directory);
+    throw error;
   }
+}
+
+async function streamPreparedDownload(response, prepared, signal) {
+  if (prepared.contentType === 'carousel') {
+    await streamCarousel(response, prepared.files, prepared.dispositionHeader, prepared.extension, signal);
+    return;
+  }
+
+  const [output] = prepared.files;
+  const contentTypes = {
+    jpg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    mp3: 'audio/mpeg',
+    mp4: 'video/mp4',
+    webm: 'video/webm'
+  };
+
+  response.writeHead(200, {
+    'Content-Type': contentTypes[prepared.extension],
+    'Content-Length': output.stats.size,
+    'Content-Disposition': prepared.dispositionHeader,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff'
+  });
+  await pipeline(fs.createReadStream(output.filePath), response, { signal });
 }
 
 async function mediaHealth(tools) {
@@ -430,8 +522,75 @@ async function mediaHealth(tools) {
   return Object.fromEntries(entries);
 }
 
-function createServer({ tools = getMediaTools() } = {}) {
+function createServer({
+  tools = getMediaTools(),
+  host = HOST,
+  allowedHosts = DEFAULT_ALLOWED_HOSTS,
+  downloadTimeoutMs = DOWNLOAD_TIMEOUT_MS,
+  pendingDownloadTtlMs = PENDING_DOWNLOAD_TTL_MS
+} = {}) {
+  const normalizedAllowedHosts = allowedHosts instanceof Set
+    ? new Set([...allowedHosts].map((entry) => String(entry).trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))
+    : parseAllowedHosts(allowedHosts);
+
   let activeJobs = 0;
+  let shuttingDown = false;
+  const activeControllers = new Set();
+  const activeJobPromises = new Set();
+  const pendingDownloads = new Map();
+  const cleanupPromises = new Set();
+
+  function removeDirectory(directory) {
+    const promise = fsp.rm(directory, { recursive: true, force: true, maxRetries: 3 })
+      .catch((error) => {
+        console.error('Could not clean up temporary media:', error.message);
+      })
+      .finally(() => {
+        cleanupPromises.delete(promise);
+      });
+    cleanupPromises.add(promise);
+    return promise;
+  }
+
+  function acquireSlot(response) {
+    if (shuttingDown) {
+      throw new AppError(503, 'Server is shutting down.');
+    }
+    if (activeJobs >= MAX_ACTIVE_JOBS) {
+      throw new AppError(429, 'Two media jobs are already running. Try again in a moment.');
+    }
+
+    const controller = new AbortController();
+    const abort = () => {
+      if (!response.writableFinished) controller.abort();
+    };
+    response.once('close', abort);
+    activeControllers.add(controller);
+    activeJobs += 1;
+
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        activeJobs -= 1;
+      }
+    };
+
+    const detach = () => {
+      activeControllers.delete(controller);
+      response.removeListener('close', abort);
+    };
+
+    return { controller, release, detach };
+  }
+
+  function trackJob(promise) {
+    activeJobPromises.add(promise);
+    return promise.finally(() => {
+      activeJobPromises.delete(promise);
+    });
+  }
+
   const server = http.createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url, 'http://localhost');
@@ -446,28 +605,120 @@ function createServer({ tools = getMediaTools() } = {}) {
         return;
       }
 
-      if (request.method === 'POST' && Object.hasOwn(MEDIA_HANDLERS, requestUrl.pathname)) {
-        requireSameOrigin(request);
-        const body = await readJson(request);
-        const url = validateMediaUrl(body.url);
-        const contentType = normalizeContentType(body.contentType);
-        if (response.destroyed || response.socket?.destroyed) return;
-
-        if (activeJobs >= MAX_ACTIVE_JOBS) {
-          throw new AppError(429, 'Two media jobs are already running. Try again in a moment.');
+      const downloadMatch = request.method === 'GET'
+        ? requestUrl.pathname.match(/^\/api\/downloads\/([A-Za-z0-9_-]{16,128})$/)
+        : null;
+      if (downloadMatch) {
+        requireSameOrigin(request, { boundHost: host, allowedHosts: normalizedAllowedHosts });
+        const token = downloadMatch[1];
+        const entry = pendingDownloads.get(token);
+        if (!entry) {
+          throw new AppError(404, 'This download link has expired or already been used.');
         }
+        pendingDownloads.delete(token);
+        clearTimeout(entry.timer);
+
+        if (shuttingDown || response.destroyed || response.socket?.destroyed) {
+          await removeDirectory(entry.prepared.directory);
+          entry.release();
+          if (shuttingDown) throw new AppError(503, 'Server is shutting down.');
+          return;
+        }
+
         const controller = new AbortController();
         const abort = () => {
           if (!response.writableFinished) controller.abort();
         };
         response.once('close', abort);
-        activeJobs += 1;
-        try {
-          await MEDIA_HANDLERS[requestUrl.pathname](response, { body, url, contentType, tools, signal: controller.signal });
-        } finally {
-          activeJobs -= 1;
-          response.removeListener('close', abort);
+        activeControllers.add(controller);
+
+        await trackJob((async () => {
+          try {
+            await streamPreparedDownload(response, entry.prepared, controller.signal);
+          } finally {
+            activeControllers.delete(controller);
+            response.removeListener('close', abort);
+            await removeDirectory(entry.prepared.directory);
+            entry.release();
+          }
+        })());
+        return;
+      }
+
+      if (request.method === 'POST' && ['/api/info', '/api/download', '/api/downloads'].includes(requestUrl.pathname)) {
+        requireSameOrigin(request, { boundHost: host, allowedHosts: normalizedAllowedHosts });
+        const body = await readJson(request);
+        const url = validateMediaUrl(body.url);
+        const contentType = normalizeContentType(body.contentType);
+        if (response.destroyed || response.socket?.destroyed) return;
+
+        const { controller, release, detach } = acquireSlot(response);
+
+        if (requestUrl.pathname === '/api/info') {
+          await trackJob((async () => {
+            try {
+              await mediaInfo(response, { url, contentType, tools, signal: controller.signal });
+            } finally {
+              detach();
+              release();
+            }
+          })());
+          return;
         }
+
+        if (requestUrl.pathname === '/api/download') {
+          await trackJob((async () => {
+            try {
+              const prepared = await prepareDownload({
+                body, url, contentType, tools, signal: controller.signal, downloadTimeoutMs, removeDirectory
+              });
+              try {
+                await streamPreparedDownload(response, prepared, controller.signal);
+              } finally {
+                await removeDirectory(prepared.directory);
+              }
+            } finally {
+              detach();
+              release();
+            }
+          })());
+          return;
+        }
+
+        // POST /api/downloads prepares media and returns a one-time URL for native browser streaming.
+        await trackJob((async () => {
+          let handedOff = false;
+          try {
+            const prepared = await prepareDownload({
+              body, url, contentType, tools, signal: controller.signal, downloadTimeoutMs, removeDirectory
+            });
+            if (shuttingDown || controller.signal.aborted) {
+              await removeDirectory(prepared.directory);
+              controller.signal.throwIfAborted();
+              throw new AppError(503, 'Server is shutting down.');
+            }
+
+            const token = crypto.randomBytes(24).toString('base64url');
+            const timer = setTimeout(() => {
+              const expired = pendingDownloads.get(token);
+              if (!expired) return;
+              pendingDownloads.delete(token);
+              removeDirectory(expired.prepared.directory).finally(expired.release);
+            }, pendingDownloadTtlMs);
+            timer.unref?.();
+
+            pendingDownloads.set(token, { prepared, timer, release });
+            handedOff = true;
+            sendJson(response, 200, {
+              downloadUrl: `/api/downloads/${token}`,
+              filename: prepared.filename,
+              size: prepared.size
+            });
+          } finally {
+            detach();
+            if (!handedOff) release();
+          }
+        })());
         return;
       }
 
@@ -489,14 +740,60 @@ function createServer({ tools = getMediaTools() } = {}) {
 
   server.requestTimeout = 30_000;
   server.headersTimeout = 30_000;
+
+  server.shutdown = async () => {
+    if (!shuttingDown) {
+      shuttingDown = true;
+
+      for (const controller of activeControllers) {
+        controller.abort(new AppError(503, 'Server is shutting down.'));
+      }
+
+      for (const [token, entry] of pendingDownloads.entries()) {
+        pendingDownloads.delete(token);
+        clearTimeout(entry.timer);
+        removeDirectory(entry.prepared.directory).finally(entry.release);
+      }
+
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(() => resolve()));
+    }
+
+    await Promise.allSettled([...activeJobPromises, ...cleanupPromises]);
+  };
+
   return server;
 }
 
 if (require.main === module) {
   const server = createServer();
+  let shuttingDownProcess = false;
+  const handleSignal = (signalName) => {
+    if (shuttingDownProcess) return;
+    shuttingDownProcess = true;
+    const forceTimer = setTimeout(() => {
+      console.error(`Forced exit after ${signalName} shutdown timeout.`);
+      process.exit(1);
+    }, 5000);
+    forceTimer.unref();
+    server.shutdown()
+      .then(() => {
+        clearTimeout(forceTimer);
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error('Error during shutdown:', error);
+        process.exit(1);
+      });
+  };
+  process.once('SIGINT', () => handleSignal('SIGINT'));
+  process.once('SIGTERM', () => handleSignal('SIGTERM'));
+
   server.listen(PORT, HOST, () => {
-    console.log(`Social Ripper is running at http://${HOST}:${PORT}`);
+    const address = server.address();
+    const displayHost = HOST.includes(':') && !HOST.startsWith('[') ? `[${HOST}]` : HOST;
+    console.log(`Social Ripper is running at http://${displayHost}:${address.port}`);
   });
 }
 
-module.exports = { createServer, downloadOptions, validateMediaUrl };
+module.exports = { contentDisposition, createServer, downloadOptions, parsePort, validateMediaUrl };

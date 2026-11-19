@@ -87,20 +87,30 @@ svg {
 
 .brand {
   display: flex;
+  min-width: 0;
   align-items: stretch;
 }
 
 .brand-initials {
   display: grid;
   width: 78px;
+  flex: 0 0 auto;
   place-items: center;
+  overflow: hidden;
   color: var(--white);
-  background: var(--orange);
+  background: var(--ink);
   border-right: 2px solid var(--ink);
   font-family: var(--mono);
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.08em;
+}
+
+.brand-initials img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brand-copy {
@@ -143,6 +153,34 @@ svg {
   border-left: 1px solid var(--ink);
 }
 
+.install-nav-button {
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  color: var(--ink);
+  background: var(--yellow);
+  border: 0;
+  border-left: 1px solid var(--ink);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.install-nav-button:hover {
+  color: var(--white);
+  background: var(--orange);
+}
+
+.install-nav-button:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: -3px;
+}
+
 .engine-status {
   gap: 9px;
 }
@@ -157,6 +195,14 @@ svg {
 
 .engine-status.is-online::before {
   background: var(--green);
+}
+
+.engine-status.is-partial::before {
+  background: var(--yellow);
+}
+
+.engine-status.is-offline::before {
+  background: var(--orange);
 }
 
 .workspace {
@@ -289,6 +335,23 @@ h1 span:last-child {
 
 .tool-content {
   padding: clamp(22px, 3vw, 36px);
+}
+
+.share-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  color: var(--ink);
+  background: var(--yellow);
+  border: 2px solid var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .field-group {
@@ -477,6 +540,7 @@ h1 span:last-child {
   height: 64px;
   padding: 0 40px 0 14px;
   color: var(--ink);
+  -webkit-appearance: none;
   appearance: none;
   background: var(--white);
   border: 2px solid var(--ink);
@@ -559,8 +623,37 @@ h1 span:last-child {
 .working-state div {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 3px;
+}
+
+.cancel-button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--white);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.cancel-button:hover {
+  color: var(--white);
+  background: var(--ink);
+}
+
+.cancel-button:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
 }
 
 .working-state strong,
@@ -731,7 +824,9 @@ h1 span:last-child {
 
 .platform-list {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--ink);
 }
 
 .platform-tag {
@@ -740,16 +835,13 @@ h1 span:last-child {
   justify-content: center;
   gap: 9px;
   min-width: 0;
+  min-height: 48px;
   padding: 0 10px;
-  border-right: 1px solid var(--ink);
+  background: var(--paper);
   font-family: var(--mono);
   font-size: 10px;
   font-weight: 700;
   transition: color 120ms ease, background 120ms ease;
-}
-
-.platform-tag:last-child {
-  border-right: 0;
 }
 
 .platform-tag b {
@@ -851,6 +943,125 @@ footer {
   letter-spacing: 0.06em;
 }
 
+.install-popup {
+  position: fixed;
+  right: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 50;
+  width: min(390px, calc(100% - 40px));
+  background: var(--panel);
+  border: 2px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+.install-popup-bar {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 14px;
+  color: var(--white);
+  background: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+}
+
+.install-close-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--white);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.install-close-button:hover {
+  color: var(--orange);
+}
+
+.install-popup-body {
+  padding: 16px;
+}
+
+.install-popup-body strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.install-popup-body p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.install-ios-steps {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.install-ios-steps strong {
+  display: inline;
+  font-size: inherit;
+  text-transform: none;
+}
+
+.install-popup-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.install-action-button,
+.install-dismiss-button {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.install-action-button {
+  flex: 1 1 auto;
+  color: var(--ink);
+  background: var(--orange);
+}
+
+.install-action-button:hover {
+  color: var(--white);
+  background: var(--ink);
+}
+
+.install-dismiss-button {
+  color: var(--ink);
+  background: var(--white);
+}
+
+.install-dismiss-button:hover {
+  color: var(--white);
+  background: var(--ink);
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -865,9 +1076,10 @@ footer {
   }
 
   .intro-panel {
-    min-height: 600px;
+    min-height: auto;
+    padding: 36px clamp(22px, 5vw, 48px);
     border-right: 0;
-    border-bottom: 2px solid var(--ink);
+    border-bottom: 0;
   }
 
   h1 {
@@ -879,7 +1091,9 @@ footer {
   }
 
   .tool-panel {
-    padding: 54px clamp(24px, 8vw, 90px);
+    order: -1;
+    padding: 28px clamp(16px, 5vw, 48px);
+    border-bottom: 2px solid var(--ink);
   }
 
   .service-rail {
@@ -887,8 +1101,7 @@ footer {
   }
 
   .platform-list {
-    grid-template-columns: repeat(5, minmax(100px, 1fr));
-    overflow-x: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .method {
@@ -903,16 +1116,17 @@ footer {
 
 @media (max-width: 700px) {
   .masthead {
-    min-height: 66px;
+    min-height: 54px;
   }
 
   .brand-initials {
-    width: 66px;
+    width: 54px;
+    font-size: 16px;
   }
 
   .brand-copy {
     min-width: 0;
-    padding: 0 14px;
+    padding: 0 12px;
   }
 
   .brand-copy strong {
@@ -920,7 +1134,8 @@ footer {
   }
 
   .brand-copy small {
-    font-size: 10px;
+    margin-top: 2px;
+    font-size: 9px;
   }
 
   .masthead-meta > span:first-child {
@@ -931,17 +1146,21 @@ footer {
     padding: 0 13px;
   }
 
+  .install-nav-button {
+    padding: 0 12px;
+  }
+
   .engine-status {
     font-size: 10px;
   }
 
   .intro-panel {
-    min-height: 570px;
-    padding: 44px 22px 28px;
+    min-height: auto;
+    padding: 28px 16px 24px;
   }
 
   .utility-code {
-    margin-bottom: 28px;
+    margin-bottom: 18px;
   }
 
   h1 {
@@ -949,15 +1168,16 @@ footer {
   }
 
   .intro-copy {
-    margin: 36px 0 44px;
+    margin: 24px 0 28px;
     font-size: 14px;
   }
 
   .tool-panel {
-    padding: 24px 14px;
+    padding: 12px 10px;
   }
 
   .tool-bar {
+    min-height: 34px;
     padding: 0 11px;
     font-size: 10px;
   }
@@ -967,11 +1187,48 @@ footer {
   }
 
   .tool-content {
-    padding: 22px 16px;
+    padding: 16px 14px;
+  }
+
+  .url-control {
+    min-height: 50px;
+  }
+
+  .url-control input {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .content-type-group {
+    margin-top: 14px;
   }
 
   .choice-grid {
     grid-template-columns: 1fr;
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  .format-option span {
+    min-height: 52px;
+  }
+
+  .select-control select {
+    height: 48px;
+    font-size: 16px;
+  }
+
+  .primary-button {
+    min-height: 50px;
+    margin-top: 14px;
+  }
+
+  .install-popup {
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
   }
 
   .result-card {
@@ -1016,7 +1273,22 @@ footer {
   }
 }
 
+@media (max-width: 480px) {
+  .platform-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .platform-tag:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 440px) {
+  .install-nav-button {
+    padding: 0 10px;
+    font-size: 9px;
+  }
+
   .engine-status {
     font-size: 0;
   }
@@ -1044,6 +1316,16 @@ footer {
 
   .system-readout div {
     grid-template-columns: 90px 1fr;
+  }
+}
+
+@media (display-mode: standalone) {
+  .masthead {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
 }
 

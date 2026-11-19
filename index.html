@@ -2,21 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta
       name="description"
       content="Social Ripper is a local utility for downloading public social media in the format and quality you need."
     >
     <meta name="theme-color" content="#e7e5de">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="SocialRipper">
     <title>Social Ripper / Local Media Tool</title>
-    <link rel="stylesheet" href="/social-ripper.css?v=7">
-    <script src="/app.js?v=5" defer></script>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=3">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=3">
+    <link rel="stylesheet" href="/social-ripper.css?v=12">
+    <script src="/app.js?v=8" defer></script>
   </head>
   <body>
     <div class="app-frame">
       <header class="masthead">
         <a class="brand" href="/" aria-label="Social Ripper home">
-          <span class="brand-initials" aria-hidden="true">SR</span>
+          <span class="brand-initials" aria-hidden="true">
+            <img src="/icons/icon-192.png?v=3" alt="" width="78" height="78">
+          </span>
           <span class="brand-copy">
             <strong>Social Ripper</strong>
             <small>Local media utility</small>
@@ -24,6 +32,7 @@
         </a>
         <div class="masthead-meta">
           <span>BUILD / 01</span>
+          <button class="install-nav-button" id="install-nav-button" type="button" hidden>INSTALL APP</button>
           <span class="engine-status" id="engine-status" role="status">CHECKING ENGINE</span>
         </div>
       </header>
@@ -39,8 +48,8 @@
 
             <div class="system-readout" aria-label="Application details">
               <div><span>INPUT</span><strong>PUBLIC HTTPS URL</strong></div>
-              <div><span>OUTPUT</span><strong>MP4 / MP3 / WEBM</strong></div>
-              <div><span>FILE LIMIT</span><strong>250 MB</strong></div>
+              <div><span>OUTPUT</span><strong>MP4 / MP3 / WEBM / IMG / ZIP</strong></div>
+              <div><span>FILE LIMIT</span><strong>UNLIMITED</strong></div>
               <div><span>PROCESSING</span><strong>ON THIS MACHINE</strong></div>
             </div>
 
@@ -57,6 +66,9 @@
                 <span>01 LINK / 02 TYPE / 03 SET / 04 RIP</span>
               </div>
               <div class="tool-content">
+                <div class="share-banner" id="share-banner" role="status" hidden>
+                  <span id="share-banner-text">SHARED LINK RECEIVED</span>
+                </div>
                 <form id="download-form" novalidate>
                   <div class="field-group">
                     <label for="media-url"><b>01</b> Source URL</label>
@@ -148,10 +160,11 @@
 
                 <div class="working-state" id="working-state" role="status" hidden>
                   <span class="spinner" aria-hidden="true"></span>
-                  <div>
+                  <div class="working-text">
                     <strong id="working-title">Inspecting source...</strong>
                     <span id="working-copy">This usually takes a few seconds.</span>
                   </div>
+                  <button class="cancel-button" id="cancel-button" type="button">Cancel</button>
                 </div>
 
                 <section class="result-card" id="result-card" aria-labelledby="result-title" hidden>
@@ -194,6 +207,10 @@
             <span class="platform-tag" data-platform="youtube"><b>03</b> YOUTUBE</span>
             <span class="platform-tag" data-platform="x"><b>04</b> X / TWITTER</span>
             <span class="platform-tag" data-platform="facebook"><b>05</b> FACEBOOK</span>
+            <span class="platform-tag" data-platform="threads"><b>06</b> THREADS</span>
+            <span class="platform-tag" data-platform="vimeo"><b>07</b> VIMEO</span>
+            <span class="platform-tag" data-platform="reddit"><b>08</b> REDDIT</span>
+            <span class="platform-tag" data-platform="pinterest"><b>09</b> PINTEREST</span>
           </div>
         </section>
 
@@ -214,6 +231,34 @@
         <span>SOCIAL RIPPER / LOCAL MEDIA UTILITY</span>
         <span>NO UPLOADS / NO ACCOUNTS / NO TRACKING</span>
       </footer>
+
+      <aside
+        class="install-popup"
+        id="install-popup"
+        role="dialog"
+        aria-labelledby="install-popup-title"
+        aria-describedby="install-popup-copy"
+        hidden
+      >
+        <div class="install-popup-bar">
+          <span>APP INSTALL / PWA</span>
+          <button class="install-close-button" id="install-close-button" type="button" aria-label="Close install prompt">×</button>
+        </div>
+        <div class="install-popup-body">
+          <strong id="install-popup-title">Install Social Ripper</strong>
+          <p id="install-popup-copy">
+            Add Social Ripper to your home screen to share reels, videos, and posts directly from Instagram, TikTok, YouTube &amp; more.
+          </p>
+          <ol class="install-ios-steps" id="install-ios-steps" hidden>
+            <li>Tap the <strong>Share</strong> button in Safari.</li>
+            <li>Tap <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+          </ol>
+          <div class="install-popup-actions">
+            <button class="install-action-button" id="install-action-button" type="button">Install app</button>
+            <button class="install-dismiss-button" id="install-dismiss-button" type="button">Not now</button>
+          </div>
+        </div>
+      </aside>
     </div>
   </body>
 </html>

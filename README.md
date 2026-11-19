@@ -13,7 +13,7 @@ A self-hosted web app for saving video, audio, and images from public social med
 | Image post | JPG, PNG, WebP | First available image from the post |
 | Carousel | ZIP | Up to 20 images in the selected image format |
 
-The app accepts public HTTPS links from Instagram, TikTok, YouTube, Facebook, X, Threads, Vimeo, Reddit, and Pinterest. Available formats depend on the source and its restrictions. Downloads are limited to 250 MiB.
+The app accepts public HTTPS links from Instagram, TikTok, YouTube, Facebook, X, Threads, Vimeo, Reddit, and Pinterest. Available formats depend on the source and its restrictions. Downloads have no artificial file-size cap and are limited only by available disk space and upstream platform limits.
 
 **Download only media you own or have permission to save.** Platform restrictions still apply.
 
@@ -28,6 +28,14 @@ The app accepts public HTTPS links from Instagram, TikTok, YouTube, Facebook, X,
 </p>
 
 *Preview sample © 2008 Blender Foundation. [Big Buck Bunny license](https://peach.blender.org/about/).*
+
+## Install as an app (PWA & direct sharing)
+
+Social Ripper is an installable Progressive Web App (PWA) with Android **Web Share Target** support:
+
+- **Android & Desktop (Chrome, Edge, Brave):** Use the in-app **Install Social Ripper** popup (or **INSTALL APP** in the header). On Android, once installed, open Instagram, TikTok, YouTube, X, or Reddit, tap **Share**, and choose **SocialRipper** to inspect the link automatically and download in one tap.
+- **iPhone / iPad (Safari):** Open the install prompt or tap **INSTALL APP**, then use Safari's **Share → Add to Home Screen** flow.
+- **HTTPS requirement:** Mobile browsers only enable PWA installation and Android Share Sheet registration when served over HTTPS (local desktop browsers also allow `http://127.0.0.1` and `http://localhost`). Deploy behind HTTPS (for example Nginx, Caddy, Cloudflare Tunnel, or Tailscale HTTPS) to install on your phone.
 
 ## Run locally
 
@@ -45,20 +53,22 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Visit `/api/health` to chec
 | Environment variable | Purpose |
 | --- | --- |
 | `HOST` / `PORT` | Listen address and port. Defaults to `127.0.0.1:3000`. |
+| `ALLOWED_HOSTS` | Comma-separated public hostnames allowed by the same-origin check (e.g. `media.example.com`). |
+| `DOWNLOAD_TIMEOUT_MS` | Maximum time in milliseconds for a download/conversion job. Defaults to `3600000` (60 minutes). |
 | `YT_DLP_BIN` / `FFMPEG_BIN` | Paths to separately installed binaries when overriding the bundled tools. |
 | `GALLERY_DL_BIN` | Path to gallery-dl when it is installed outside `PATH` and `node_modules/.bin`. |
 
 ## How it works
 
-The Node.js server serves the interface and keeps the app and API on the same origin. `POST /api/info` retrieves metadata for the preview. `POST /api/download` uses yt-dlp for video and audio, gallery-dl for images, and FFmpeg for conversion. Archiver streams carousel ZIPs.
+The Node.js server serves the interface and keeps the app and API on the same origin. `POST /api/info` retrieves metadata for the preview. `POST /api/downloads` prepares video/audio via yt-dlp and FFmpeg or images via gallery-dl and FFmpeg, then returns a one-time `GET /api/downloads/:token` URL so the browser streams the file (or store-mode Archiver ZIP for carousels) straight to disk without buffering it in memory. Direct `POST /api/download` streaming is also supported.
 
-Media processing uses the server's temporary storage. Inspection and download requests share two concurrent job slots per process. The server cancels work when a client disconnects and cleans up temporary files after the job.
+Media processing uses the server's temporary storage. Inspection and download requests share two concurrent job slots per process. The server cancels work when a client disconnects or on `SIGINT`/`SIGTERM` shutdown and cleans up temporary files after the job.
 
 ## Public deployment
 
 1. Run `npm ci` and `npm start` as a persistent Node.js service with outbound HTTPS access and writable temporary storage.
-2. Keep the Node.js port private and put the public hostname behind an HTTPS reverse proxy. Validate the public `Host` and `Origin` before forwarding media requests with the matching HTTP upstream values.
-3. Rate-limit `/api/info` and `/api/download` at the proxy. Check `/api/health`, then inspect and download a sample through the public HTTPS URL.
+2. Keep the Node.js port private and put the public hostname behind an HTTPS reverse proxy. Either set `ALLOWED_HOSTS=media.example.com` on Node.js (and forward the public `Host` and `Origin` headers) or rewrite them at the proxy to match the upstream HTTP address.
+3. Rate-limit `/api/info`, `/api/download`, and `/api/downloads` at the proxy. Check `/api/health`, then inspect and download a sample through the public HTTPS URL.
 
 <details>
 <summary>Nginx configuration example</summary>
@@ -69,7 +79,7 @@ Add the rate-limit zone inside Nginx's `http` block.
 limit_req_zone $binary_remote_addr zone=social_ripper:10m rate=12r/m;
 ```
 
-Add the following to your HTTPS `server` block. Replace `media.example.com` with your public hostname and adjust the upstream address and port to match Node.js.
+Add the following to your HTTPS `server` block. Replace `media.example.com` with your public hostname and adjust the upstream address and port to match Node.js. If Node.js is started with `ALLOWED_HOSTS=media.example.com`, you can forward the public `Host` and `Origin` directly instead of overriding them.
 
 ```nginx
 server_name media.example.com;
@@ -82,7 +92,7 @@ location / {
     proxy_pass http://127.0.0.1:3000;
 }
 
-location ~ ^/api/(info|download)$ {
+location ~ ^/api/(info|download|downloads)$ {
     if ($http_origin != "https://media.example.com") {
         return 403;
     }
@@ -93,8 +103,17 @@ location ~ ^/api/(info|download)$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Host 127.0.0.1:3000;
     proxy_set_header Origin http://127.0.0.1:3000;
-    proxy_read_timeout 12m;
+    proxy_read_timeout 60m;
     proxy_buffering off;
+}
+
+location ^~ /api/downloads/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host 127.0.0.1:3000;
+    proxy_set_header Origin http://127.0.0.1:3000;
+    proxy_buffering off;
+    proxy_max_temp_file_size 0;
+    proxy_read_timeout 60m;
 }
 ```
 
