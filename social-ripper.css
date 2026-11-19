@@ -77,10 +77,10 @@ svg {
 }
 
 .masthead {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   min-height: 78px;
   align-items: stretch;
-  justify-content: space-between;
   background: var(--panel);
   border-bottom: 2px solid var(--ink);
 }
@@ -88,6 +88,7 @@ svg {
 .brand {
   display: flex;
   min-width: 0;
+  min-height: 78px;
   align-items: stretch;
 }
 
@@ -135,6 +136,62 @@ svg {
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.masthead-nav {
+  display: flex;
+  align-items: stretch;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.masthead-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 18px;
+  color: var(--ink);
+  border-left: 1px solid var(--ink);
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.masthead-link svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.masthead-link.is-kofi svg {
+  color: var(--orange-dark);
+}
+
+.masthead-link.is-kofi:hover {
+  color: var(--white);
+  background: var(--orange);
+}
+
+.masthead-link.is-kofi:hover svg {
+  color: var(--white);
+}
+
+.masthead-link.is-bmc:hover {
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.masthead-link.is-github:hover {
+  color: var(--white);
+  background: var(--ink);
+}
+
+.masthead-link:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: -3px;
 }
 
 .masthead-meta {
@@ -945,107 +1002,6 @@ h1 span:last-child {
   letter-spacing: 0.05em;
 }
 
-.support-rail {
-  display: grid;
-  grid-template-columns: 190px 1fr;
-  border-bottom: 2px solid var(--ink);
-}
-
-.support-links {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--ink);
-}
-
-.support-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  min-height: 76px;
-  padding: 14px 20px;
-  background: var(--panel);
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.support-icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--ink);
-  background: var(--white);
-  color: var(--ink);
-}
-
-.support-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.support-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.support-copy strong {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.support-copy small {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.support-arrow {
-  font-family: var(--mono);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.support-card.is-kofi:hover {
-  color: var(--white);
-  background: var(--orange);
-}
-
-.support-card.is-kofi:hover small {
-  color: var(--ink);
-}
-
-.support-card.is-bmc:hover {
-  color: var(--ink);
-  background: var(--yellow);
-}
-
-.support-card.is-bmc:hover small {
-  color: var(--ink);
-}
-
-.support-card.is-github:hover {
-  color: var(--white);
-  background: var(--ink);
-}
-
-.support-card.is-github:hover small {
-  color: #b8b7af;
-}
-
-.support-card:focus-visible {
-  outline: 3px solid var(--orange);
-  outline-offset: -3px;
-}
-
 footer {
   display: flex;
   flex-wrap: wrap;
@@ -1215,13 +1171,8 @@ footer {
     border-bottom: 2px solid var(--ink);
   }
 
-  .service-rail,
-  .support-rail {
+  .service-rail {
     grid-template-columns: 160px 1fr;
-  }
-
-  .support-links {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .platform-list {
@@ -1238,13 +1189,41 @@ footer {
   }
 }
 
+@media (max-width: 980px) {
+  .masthead {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .masthead-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--ink);
+  }
+
+  .masthead-link {
+    min-height: 44px;
+    padding: 0 10px;
+  }
+
+  .masthead-link:first-child {
+    border-left: 0;
+  }
+}
+
 @media (max-width: 700px) {
   .masthead {
+    min-height: 0;
+  }
+
+  .brand {
     min-height: 54px;
   }
 
   .brand-initials {
     width: 54px;
+    height: 54px;
     font-size: 16px;
   }
 
@@ -1260,6 +1239,10 @@ footer {
   .brand-copy small {
     margin-top: 2px;
     font-size: 9px;
+  }
+
+  .masthead-link {
+    min-height: 42px;
   }
 
   .masthead-meta > span {
@@ -1359,12 +1342,7 @@ footer {
     width: 100%;
   }
 
-  .service-rail,
-  .support-rail {
-    grid-template-columns: 1fr;
-  }
-
-  .support-links {
+  .service-rail {
     grid-template-columns: 1fr;
   }
 
@@ -1400,6 +1378,22 @@ footer {
 }
 
 @media (max-width: 480px) {
+  .masthead-nav {
+    grid-template-columns: 0.82fr 1.36fr 0.82fr;
+  }
+
+  .masthead-link {
+    gap: 5px;
+    padding: 0 6px;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+
+  .masthead-link svg {
+    width: 13px;
+    height: 13px;
+  }
+
   .platform-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

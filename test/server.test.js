@@ -196,14 +196,20 @@ test('server serves the app, PWA assets, share target, and validates API input',
   assert.match(html, /href="https:\/\/github\.com\/Dipak-Chauhan\/SocialRipper"[^>]*rel="noopener noreferrer"/);
   assert.match(html, /href="https:\/\/ko-fi\.com\/dipakchauhan"[^>]*rel="noopener noreferrer"/);
   assert.match(html, /href="https:\/\/buymeacoffee\.com\/dipakchauhan"[^>]*rel="noopener noreferrer"/);
-  for (const url of [
+  const expectedUrls = [
     'https://github.com/Dipak-Chauhan/SocialRipper',
     'https://ko-fi.com/dipakchauhan',
     'https://buymeacoffee.com/dipakchauhan'
-  ]) {
+  ];
+  for (const url of expectedUrls) {
     assert.equal(html.split(url).length - 1, 1, `expected ${url} once in index.html`);
   }
-  assert.doesNotMatch(html, /class="masthead-link"/);
+  const masthead = html.match(/<header class="masthead">[\s\S]*?<\/header>/)?.[0] || '';
+  assert.match(masthead, /class="masthead-nav"/);
+  for (const url of expectedUrls) {
+    assert.ok(masthead.includes(url), `expected ${url} inside masthead`);
+  }
+  assert.doesNotMatch(html, /class="support-rail"/);
   assert.doesNotMatch(html, /class="footer-links"/);
 
   const shareResponse = await fetch(`${origin}/share-target?text=${encodeURIComponent('Watch https://www.instagram.com/reel/example/')}`);
