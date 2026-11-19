@@ -42,6 +42,8 @@ const HOST = process.env.HOST || '127.0.0.1';
 const DEFAULT_ALLOWED_HOSTS = parseAllowedHosts(process.env.ALLOWED_HOSTS);
 const DOWNLOAD_TIMEOUT_MS = parsePositiveInt(process.env.DOWNLOAD_TIMEOUT_MS, 60 * 60_000);
 const PENDING_DOWNLOAD_TTL_MS = parsePositiveInt(process.env.PENDING_DOWNLOAD_TTL_MS, 60_000);
+const INFO_CACHE_TTL_MS = 5 * 60_000;
+const INFO_CACHE_MAX_ENTRIES = 25;
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_ACTIVE_JOBS = 2;
 
@@ -132,9 +134,31 @@ function imageExtension(format) {
   return format === 'jpeg' ? 'jpg' : format;
 }
 
-function downloadOptions(format, quality, outputTemplate) {
+function downloadOptions(format, quality, outputTemplate, { trackProgress = false, loadInfoJson = null } = {}) {
   if (!['mp4', 'mp3', 'webm'].includes(format)) {
     throw new AppError(400, 'Choose a supported file format.');
+  }
+
+  const shared = {
+    output: outputTemplate,
+    forceIpv4: true,
+    concurrentFragments: 4,
+    noPlaylist: true,
+    playlistEnd: 1,
+    noWarnings: true,
+    quiet: true,
+    retries: 2,
+    socketTimeout: 20
+  };
+  if (trackProgress) {
+    shared.progress = true;
+    shared.newline = true;
+    shared.progressTemplate = 'download:SR_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s';
+  } else {
+    shared.noProgress = true;
+  }
+  if (loadInfoJson) {
+    shared.loadInfoJson = loadInfoJson;
   }
 
   if (format === 'mp3') {
@@ -143,18 +167,11 @@ function downloadOptions(format, quality, outputTemplate) {
     }
 
     return {
+      ...shared,
       extractAudio: true,
       audioFormat: 'mp3',
       audioQuality: `${quality}K`,
-      format: 'bestaudio/best',
-      output: outputTemplate,
-      noPlaylist: true,
-      playlistEnd: 1,
-      noProgress: true,
-      noWarnings: true,
-      quiet: true,
-      retries: 2,
-      socketTimeout: 20
+      format: 'bestaudio/best'
     };
   }
 
@@ -171,18 +188,23 @@ function downloadOptions(format, quality, outputTemplate) {
     `b${heightFilter}`
   ].join('/');
 
+  if (format === 'mp4') {
+    return {
+      ...shared,
+      format: selector,
+      formatSort: 'ext:mp4:m4a,vcodec:h264',
+      mergeOutputFormat: 'mp4',
+      remuxVideo: 'mp4'
+    };
+  }
+
   return {
+    ...shared,
     format: selector,
-    mergeOutputFormat: `${format}/mkv`,
-    recodeVideo: format,
-    output: outputTemplate,
-    noPlaylist: true,
-    playlistEnd: 1,
-    noProgress: true,
-    noWarnings: true,
-    quiet: true,
-    retries: 2,
-    socketTimeout: 20
+    formatSort: 'ext:webm,vcodec:vp9',
+    mergeOutputFormat: 'webm/mkv',
+    recodeVideo: 'webm',
+    postprocessorArgs: 'VideoConvertor+ffmpeg_o:-deadline realtime -cpu-used 4'
   };
 }
 
@@ -365,6 +387,7 @@ async function serveStatic(response, pathname) {
 async function inspectVideo(tools, url, signal) {
   const options = {
     dumpSingleJson: true,
+    forceIpv4: true,
     noWarnings: true,
     quiet: true,
     retries: 1,
@@ -379,24 +402,24 @@ async function inspectVideo(tools, url, signal) {
     ? [...info.thumbnails].reverse().find((thumbnail) => safeThumbnail(thumbnail?.url))
     : null;
   return {
-    title: info.title,
-    uploader: info.uploader || info.channel,
-    platform: info.extractor_key || info.extractor,
-    duration: info.duration,
-    thumbnail: safeThumbnail(info.thumbnail) || safeThumbnail(thumbnailData?.url),
-    width: info.width || thumbnailData?.width,
-    height: info.height || thumbnailData?.height,
-    itemCount: 1
+    metadata: {
+      title: info.title,
+      uploader: info.uploader || info.channel,
+      platform: info.extractor_key || info.extractor,
+      duration: info.duration,
+      thumbnail: safeThumbnail(info.thumbnail) || safeThumbnail(thumbnailData?.url),
+      width: info.width || thumbnailData?.width,
+      height: info.height || thumbnailData?.height,
+      itemCount: 1
+    },
+    rawJson: output
   };
 }
 
-async function mediaInfo(response, { url, contentType, tools, signal }) {
-  const info = await extractMedia(() => contentType === 'video'
-    ? inspectVideo(tools, url, signal)
-    : inspectImages(tools, url, contentType, signal));
+function buildMetadata(info) {
   const width = Number(info.width);
   const height = Number(info.height);
-  sendJson(response, 200, {
+  return {
     title: safeText(info.title, 'Untitled media'),
     uploader: safeText(info.uploader, '', 80),
     platform: safeText(info.platform, 'Media', 40),
@@ -405,27 +428,110 @@ async function mediaInfo(response, { url, contentType, tools, signal }) {
     width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
     itemCount: info.itemCount
-  });
+  };
 }
 
-async function downloadVideo(tools, url, format, quality, directory, signal, timeoutMs) {
-  const template = path.join(directory, 'media.%(ext)s');
-  const options = downloadOptions(format, quality, template);
-  options.ffmpegLocation = await requireTool(tools, 'ffmpeg');
-  const { diagnostic } = await runYtDlp(tools, url, options, {
-    signal, timeoutMs
+async function mediaInfo(response, { url, contentType, tools, signal, saveCache = null }) {
+  const extracted = await extractMedia(() => contentType === 'video'
+    ? inspectVideo(tools, url, signal)
+    : inspectImages(tools, url, contentType, signal));
+  const rawInfo = contentType === 'video' ? extracted.metadata : extracted;
+  const metadata = buildMetadata(rawInfo);
+  saveCache?.({
+    metadata,
+    rawJson: contentType === 'video' ? extracted.rawJson : null
   });
+  sendJson(response, 200, metadata);
+}
 
-  const name = 'media.' + format;
-  const filePath = path.join(directory, name);
-  const stats = await fsp.lstat(filePath).catch((error) => {
-    if (error.code !== 'ENOENT') throw error;
-  });
-  if (!stats?.isFile() || !stats.size) {
-    if (diagnostic) throw new Error(diagnostic);
-    throw new AppError(422, 'The media extractor did not create the requested file.');
+function createProgressReporter(onProgress) {
+  if (!onProgress) return null;
+  let lastEmit = 0;
+  let lastPercent = -1;
+
+  return (line) => {
+    const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+    if (!clean.startsWith('SR_PROGRESS:')) return;
+
+    const [percentRaw = '', speedRaw = '', etaRaw = ''] = clean.slice('SR_PROGRESS:'.length).split('|');
+    const parsedPercent = Number.parseFloat(percentRaw.replace('%', '').trim());
+    const percent = Number.isFinite(parsedPercent) ? Math.max(0, Math.min(100, parsedPercent)) : null;
+    const speedText = speedRaw.trim();
+    const etaText = etaRaw.trim();
+    const speed = speedText && !/^(n\/a|unknown)$/i.test(speedText) ? speedText : '';
+    const eta = etaText && !/^(n\/a|unknown)$/i.test(etaText) ? etaText : '';
+
+    const now = Date.now();
+    if (now - lastEmit < 200 && percent !== 100 && lastPercent !== -1) return;
+    lastEmit = now;
+    if (percent !== null) lastPercent = percent;
+    onProgress({ stage: 'downloading', percent, speed, eta });
+  };
+}
+
+async function downloadVideo(
+  tools,
+  url,
+  format,
+  quality,
+  directory,
+  signal,
+  timeoutMs,
+  { cachedRawJson = null, invalidateCache = null, onProgress = null } = {}
+) {
+  const template = path.join(directory, 'media.%(ext)s');
+  const ffmpegLocation = await requireTool(tools, 'ffmpeg');
+  const progressReporter = createProgressReporter(onProgress);
+  const deadline = Date.now() + timeoutMs;
+
+  async function runOnce(loadInfoJson) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new AppError(504, 'Media processing timed out.');
+    const options = downloadOptions(format, quality, template, {
+      trackProgress: Boolean(progressReporter),
+      loadInfoJson
+    });
+    options.ffmpegLocation = ffmpegLocation;
+    const { diagnostic } = await runYtDlp(tools, url, options, {
+      signal,
+      timeoutMs: remainingMs,
+      onLine: progressReporter
+    });
+
+    const name = 'media.' + format;
+    const filePath = path.join(directory, name);
+    const stats = await fsp.lstat(filePath).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    if (!stats?.isFile() || !stats.size) {
+      if (diagnostic) throw new Error(diagnostic);
+      throw new AppError(422, 'The media extractor did not create the requested file.');
+    }
+    return [{ name, filePath, stats }];
   }
-  return [{ name, filePath, stats }];
+
+  if (!cachedRawJson) {
+    return runOnce(null);
+  }
+
+  const infoJsonPath = path.join(directory, 'info.json');
+  await fsp.writeFile(infoJsonPath, cachedRawJson, 'utf8');
+  try {
+    try {
+      return await runOnce(infoJsonPath);
+    } catch (error) {
+      if (error.name === 'AbortError' || (error instanceof AppError && (error.statusCode === 503 || error.statusCode === 504))) {
+        throw error;
+      }
+      invalidateCache?.();
+      const entries = await fsp.readdir(directory);
+      await Promise.all(entries.map((entry) => fsp.rm(path.join(directory, entry), { recursive: true, force: true })));
+      onProgress?.({ stage: 'starting' });
+      return await runOnce(null);
+    }
+  } finally {
+    await fsp.rm(infoJsonPath, { force: true }).catch(() => {});
+  }
 }
 
 async function streamCarousel(response, files, dispositionHeader, extension, signal) {
@@ -455,19 +561,44 @@ async function streamCarousel(response, files, dispositionHeader, extension, sig
   }
 }
 
-async function prepareDownload({ body, url, contentType, tools, signal, downloadTimeoutMs, removeDirectory }) {
+function validateDownloadParams(contentType, body) {
   const format = typeof body.format === 'string' ? body.format.toLowerCase() : '';
   const quality = typeof body.quality === 'string' ? body.quality.toLowerCase() : '';
   const extension = contentType === 'video' ? format : imageExtension(format);
   if (contentType === 'video') {
     downloadOptions(format, quality, 'validate.%(ext)s');
   }
+  return { format, quality, extension };
+}
+
+async function prepareDownload({
+  body,
+  url,
+  contentType,
+  tools,
+  signal,
+  downloadTimeoutMs,
+  removeDirectory,
+  cachedRawJson = null,
+  invalidateCache = null,
+  onProgress = null
+}) {
+  const { format, quality, extension } = validateDownloadParams(contentType, body);
 
   const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'social-ripper-'));
   try {
     const files = await extractMedia(() => contentType === 'video'
-      ? downloadVideo(tools, url, format, quality, directory, signal, downloadTimeoutMs)
-      : downloadImages(tools, url, contentType, extension, { directory, signal, timeoutMs: downloadTimeoutMs }));
+      ? downloadVideo(tools, url, format, quality, directory, signal, downloadTimeoutMs, {
+          cachedRawJson,
+          invalidateCache,
+          onProgress
+        })
+      : downloadImages(tools, url, contentType, extension, {
+          directory,
+          signal,
+          timeoutMs: downloadTimeoutMs,
+          onProgress
+        }));
     signal.throwIfAborted();
 
     const disposition = contentType === 'carousel'
@@ -527,7 +658,9 @@ function createServer({
   host = HOST,
   allowedHosts = DEFAULT_ALLOWED_HOSTS,
   downloadTimeoutMs = DOWNLOAD_TIMEOUT_MS,
-  pendingDownloadTtlMs = PENDING_DOWNLOAD_TTL_MS
+  pendingDownloadTtlMs = PENDING_DOWNLOAD_TTL_MS,
+  infoCacheTtlMs = INFO_CACHE_TTL_MS,
+  infoCacheMaxEntries = INFO_CACHE_MAX_ENTRIES
 } = {}) {
   const normalizedAllowedHosts = allowedHosts instanceof Set
     ? new Set([...allowedHosts].map((entry) => String(entry).trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))
@@ -539,6 +672,27 @@ function createServer({
   const activeJobPromises = new Set();
   const pendingDownloads = new Map();
   const cleanupPromises = new Set();
+  const infoCache = new Map();
+
+  function getCachedInfo(key) {
+    const entry = infoCache.get(key);
+    if (!entry) return null;
+    if (Date.now() >= entry.expiresAt) {
+      infoCache.delete(key);
+      return null;
+    }
+    return entry;
+  }
+
+  function setCachedInfo(key, entry) {
+    if (infoCacheMaxEntries <= 0 || infoCacheTtlMs <= 0) return;
+    infoCache.delete(key);
+    while (infoCache.size >= infoCacheMaxEntries) {
+      const oldestKey = infoCache.keys().next().value;
+      infoCache.delete(oldestKey);
+    }
+    infoCache.set(key, { ...entry, expiresAt: Date.now() + infoCacheTtlMs });
+  }
 
   function removeDirectory(directory) {
     const promise = fsp.rm(directory, { recursive: true, force: true, maxRetries: 3 })
@@ -652,12 +806,26 @@ function createServer({
         const contentType = normalizeContentType(body.contentType);
         if (response.destroyed || response.socket?.destroyed) return;
 
-        const { controller, release, detach } = acquireSlot(response);
+        const cacheKey = `${contentType}:${url}`;
 
         if (requestUrl.pathname === '/api/info') {
+          if (shuttingDown) throw new AppError(503, 'Server is shutting down.');
+          const cached = getCachedInfo(cacheKey);
+          if (cached) {
+            sendJson(response, 200, cached.metadata);
+            return;
+          }
+
+          const { controller, release, detach } = acquireSlot(response);
           await trackJob((async () => {
             try {
-              await mediaInfo(response, { url, contentType, tools, signal: controller.signal });
+              await mediaInfo(response, {
+                url,
+                contentType,
+                tools,
+                signal: controller.signal,
+                saveCache: (entry) => setCachedInfo(cacheKey, entry)
+              });
             } finally {
               detach();
               release();
@@ -666,11 +834,23 @@ function createServer({
           return;
         }
 
+        validateDownloadParams(contentType, body);
+        const cached = contentType === 'video' ? getCachedInfo(cacheKey) : null;
+        const { controller, release, detach } = acquireSlot(response);
+
         if (requestUrl.pathname === '/api/download') {
           await trackJob((async () => {
             try {
               const prepared = await prepareDownload({
-                body, url, contentType, tools, signal: controller.signal, downloadTimeoutMs, removeDirectory
+                body,
+                url,
+                contentType,
+                tools,
+                signal: controller.signal,
+                downloadTimeoutMs,
+                removeDirectory,
+                cachedRawJson: cached?.rawJson || null,
+                invalidateCache: () => infoCache.delete(cacheKey)
               });
               try {
                 await streamPreparedDownload(response, prepared, controller.signal);
@@ -686,11 +866,36 @@ function createServer({
         }
 
         // POST /api/downloads prepares media and returns a one-time URL for native browser streaming.
+        const wantsProgress = (request.headers.accept || '').toLowerCase().includes('application/x-ndjson');
         await trackJob((async () => {
           let handedOff = false;
+          let sendEvent = null;
+          if (wantsProgress) {
+            response.writeHead(200, {
+              'Content-Type': 'application/x-ndjson; charset=utf-8',
+              'Cache-Control': 'no-store',
+              'X-Accel-Buffering': 'no'
+            });
+            sendEvent = (payload) => {
+              if (!response.destroyed && !response.writableEnded) {
+                response.write(`${JSON.stringify(payload)}\n`);
+              }
+            };
+            sendEvent({ stage: 'starting' });
+          }
+
           try {
             const prepared = await prepareDownload({
-              body, url, contentType, tools, signal: controller.signal, downloadTimeoutMs, removeDirectory
+              body,
+              url,
+              contentType,
+              tools,
+              signal: controller.signal,
+              downloadTimeoutMs,
+              removeDirectory,
+              cachedRawJson: cached?.rawJson || null,
+              invalidateCache: () => infoCache.delete(cacheKey),
+              onProgress: sendEvent
             });
             if (shuttingDown || controller.signal.aborted) {
               await removeDirectory(prepared.directory);
@@ -709,11 +914,28 @@ function createServer({
 
             pendingDownloads.set(token, { prepared, timer, release });
             handedOff = true;
-            sendJson(response, 200, {
+            const readyPayload = {
               downloadUrl: `/api/downloads/${token}`,
               filename: prepared.filename,
               size: prepared.size
-            });
+            };
+            if (wantsProgress) {
+              if (!response.destroyed && !response.writableEnded) {
+                response.end(`${JSON.stringify({ stage: 'ready', ...readyPayload })}\n`);
+              }
+            } else {
+              sendJson(response, 200, readyPayload);
+            }
+          } catch (error) {
+            if (!wantsProgress) throw error;
+            if (error.name === 'AbortError' || controller.signal.aborted || response.destroyed) {
+              return;
+            }
+            const message = error instanceof AppError ? error.message : 'Unexpected server error.';
+            if (!(error instanceof AppError)) console.error(error);
+            if (!response.writableEnded) {
+              response.end(`${JSON.stringify({ stage: 'error', error: message })}\n`);
+            }
           } finally {
             detach();
             if (!handedOff) release();

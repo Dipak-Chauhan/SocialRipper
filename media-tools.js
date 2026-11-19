@@ -1,9 +1,12 @@
 const { execFile, spawn } = require('node:child_process');
 const { constants } = require('node:fs');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const ffmpegPath = require('ffmpeg-static');
 const youtubeDlPackage = require('youtube-dl-exec');
+
+const DEFAULT_YT_DLP_CACHE_DIR = path.join(os.tmpdir(), 'social-ripper-ytdlp-cache');
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'tif', 'tiff', 'jxl', 'heic', 'heif']);
 const MAX_IMAGES = 20;
@@ -52,7 +55,31 @@ async function requireTool(tools, name) {
   return executable;
 }
 
-function runTool(executable, args, { name, signal, timeoutMs, largeOutput = false }) {
+function createLineSplitter(onLine) {
+  let buffer = '';
+  return {
+    push(chunk) {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split(/\r?\n|\r/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line) onLine(line);
+      }
+    },
+    flush() {
+      if (buffer) {
+        onLine(buffer);
+        buffer = '';
+      }
+    }
+  };
+}
+
+function isProgressMarker(line) {
+  return line.startsWith('SR_PROGRESS:') || line.startsWith('SR_STAGE:');
+}
+
+function runTool(executable, args, { name, signal, timeoutMs, largeOutput = false, onLine = null }) {
   signal.throwIfAborted();
 
   return new Promise((resolve, reject) => {
@@ -103,17 +130,45 @@ function runTool(executable, args, { name, signal, timeoutMs, largeOutput = fals
     signal.addEventListener('abort', abort, { once: true });
     timeout = setTimeout(() => stop(new AppError(504, 'Media processing timed out.')), timeoutMs);
 
-    child.stdout.on('data', (chunk) => {
+    const pushStdout = (chunk) => {
       stdoutSize += chunk.length;
       if (stdoutSize > (largeOutput ? 16 : 1) * 1024 * 1024) {
         stop(new AppError(422, 'Media extractor output was too large.'));
         return;
       }
       stdout.push(chunk);
-    });
-    child.stderr.on('data', (chunk) => {
+    };
+
+    const pushStderr = (chunk) => {
       stderrSize += chunk.length;
       if (stderrSize <= 2 * 1024 * 1024) stderr.push(chunk);
+    };
+
+    const stdoutLines = onLine ? createLineSplitter((line) => {
+      if (isProgressMarker(line)) {
+        onLine(line);
+        return;
+      }
+      onLine(line);
+      pushStdout(Buffer.from(`${line}\n`));
+    }) : null;
+
+    const stderrLines = onLine ? createLineSplitter((line) => {
+      if (isProgressMarker(line)) {
+        onLine(line);
+        return;
+      }
+      onLine(line);
+      pushStderr(Buffer.from(`${line}\n`));
+    }) : null;
+
+    child.stdout.on('data', (chunk) => {
+      if (stdoutLines) stdoutLines.push(chunk);
+      else pushStdout(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      if (stderrLines) stderrLines.push(chunk);
+      else pushStderr(chunk);
     });
     child.on('error', (error) => {
       const mapped = ['ENOENT', 'EACCES', 'ENOEXEC'].includes(error.code)
@@ -123,6 +178,8 @@ function runTool(executable, args, { name, signal, timeoutMs, largeOutput = fals
       settle(failure);
     });
     child.on('close', (exitCode) => {
+      stdoutLines?.flush();
+      stderrLines?.flush();
       if (failure) return settle(failure);
       const diagnostic = Buffer.concat(stderr).toString('utf8').trim();
       if (exitCode !== 0) return settle(new Error(diagnostic || `${name} failed.`));
@@ -143,7 +200,11 @@ function parseToolJson(output, isValid) {
 
 async function runYtDlp(tools, url, flags, options) {
   const executable = await requireTool(tools, 'yt-dlp');
-  const args = ['--ignore-config', '--no-cache-dir', ...youtubeDlPackage.args(flags), '--', url];
+  const cacheDir = options.cacheDir || DEFAULT_YT_DLP_CACHE_DIR;
+  const args = ['--ignore-config', '--cache-dir', cacheDir, ...youtubeDlPackage.args(flags)];
+  if (!flags.loadInfoJson) {
+    args.push('--', url);
+  }
   return runTool(executable, args, { ...options, name: 'yt-dlp', largeOutput: flags.dumpSingleJson });
 }
 
@@ -183,7 +244,7 @@ async function inspectImages(tools, url, contentType, signal) {
   };
 }
 
-async function downloadImages(tools, url, contentType, extension, { directory, signal, timeoutMs = 60 * 60_000 }) {
+async function downloadImages(tools, url, contentType, extension, { directory, signal, timeoutMs = 60 * 60_000, onProgress = null }) {
   const galleryDl = await requireTool(tools, 'gallery-dl');
   const ffmpeg = await requireTool(tools, 'ffmpeg');
   const deadline = Date.now() + timeoutMs;
@@ -193,6 +254,7 @@ async function downloadImages(tools, url, contentType, extension, { directory, s
     return remainingMs;
   };
 
+  onProgress?.({ stage: 'downloading', detail: 'Fetching images...' });
   const args = [
     ...galleryArgs(contentType),
     '-o', 'output.mode=null', '--Print', 'after:{_path}', '--directory', directory, '--', url
@@ -218,7 +280,14 @@ async function downloadImages(tools, url, contentType, extension, { directory, s
     if (sourceStat.isSymbolicLink() || !sourceStat.isFile() || (await fs.realpath(path.dirname(source))) !== realDirectory) {
       throw new AppError(422, 'The image extractor returned an invalid file.');
     }
-    const name = `image-${String(outputs.length + 1).padStart(2, '0')}.${extension}`;
+    const current = outputs.length + 1;
+    onProgress?.({
+      stage: 'converting',
+      current,
+      total: files.length,
+      percent: Math.round((current / files.length) * 100)
+    });
+    const name = `image-${String(current).padStart(2, '0')}.${extension}`;
     const target = path.join(resultDirectory, name);
     await runTool(ffmpeg, [
       '-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file',

@@ -12,6 +12,8 @@ const platformTags = [...document.querySelectorAll('[data-platform]')];
 const workingState = document.querySelector('#working-state');
 const workingTitle = document.querySelector('#working-title');
 const workingCopy = document.querySelector('#working-copy');
+const workingProgress = document.querySelector('#working-progress');
+const workingProgressFill = document.querySelector('#working-progress-fill');
 const cancelButton = document.querySelector('#cancel-button');
 const resultCard = document.querySelector('#result-card');
 const resultPreview = document.querySelector('.result-preview');
@@ -102,11 +104,24 @@ function setError(message = '') {
   urlInput.setAttribute('aria-invalid', String(Boolean(message)));
 }
 
+function setWorkingProgress(percent = null) {
+  if (Number.isFinite(percent)) {
+    const clamped = Math.max(0, Math.min(100, percent));
+    workingProgress.hidden = false;
+    workingProgressFill.style.width = `${clamped}%`;
+  } else {
+    workingProgress.hidden = true;
+    workingProgressFill.style.width = '0%';
+  }
+}
+
 function setWorking(active, title = '', copy = '') {
   workingState.hidden = !active;
   if (active) {
     workingTitle.textContent = title;
     workingCopy.textContent = copy;
+  } else {
+    setWorkingProgress(null);
   }
 }
 
@@ -357,6 +372,7 @@ async function analyzeMedia(event, { fromShare = false } = {}) {
   const request = new AbortController();
   activeRequest = request;
   resultCard.hidden = true;
+  setWorkingProgress(null);
   setAnalyzeBusy(true);
   setWorking(true, 'Inspecting source...', 'This usually takes a few seconds.');
 
@@ -396,6 +412,62 @@ async function analyzeMedia(event, { fromShare = false } = {}) {
   }
 }
 
+async function readDownloadStream(response, outputLabel) {
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.includes('application/x-ndjson') || !response.body) {
+    return response.json();
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let readyPayload = null;
+
+  const handleEvent = (line) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.stage === 'downloading') {
+      if (Number.isFinite(event.percent)) {
+        workingTitle.textContent = `Downloading ${outputLabel} — ${Math.round(event.percent)}%`;
+        setWorkingProgress(event.percent);
+      } else {
+        workingTitle.textContent = `Downloading ${outputLabel}...`;
+      }
+      const details = [];
+      if (event.speed) details.push(event.speed);
+      if (event.eta) details.push(`ETA ${event.eta}`);
+      if (details.length) {
+        workingCopy.textContent = details.join(' · ');
+      } else if (event.detail) {
+        workingCopy.textContent = event.detail;
+      }
+    } else if (event.stage === 'converting') {
+      workingTitle.textContent = `Converting image ${event.current}/${event.total}...`;
+      setWorkingProgress(event.percent);
+    } else if (event.stage === 'ready') {
+      setWorkingProgress(100);
+      readyPayload = event;
+    } else if (event.stage === 'error') {
+      throw new Error(event.error || 'Could not download this media.');
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) handleEvent(line);
+    }
+    if (done) break;
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) handleEvent(buffer);
+  if (!readyPayload) throw new Error('Download stream ended before finishing.');
+  return readyPayload;
+}
+
 async function downloadMedia() {
   const contentType = selectedContentType();
   if (
@@ -414,13 +486,17 @@ async function downloadMedia() {
   downloadButton.disabled = true;
   analyzeButton.disabled = true;
   setError();
+  setWorkingProgress(null);
   const outputLabel = contentType === 'carousel' ? 'ZIP' : format.toUpperCase();
-  setWorking(true, `Preparing ${outputLabel}...`, 'Large files stream straight to your browser once ready.');
+  setWorking(true, `Preparing ${outputLabel}...`, 'Fetching media streams from source...');
 
   try {
     const response = await fetch('/api/downloads', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson, application/json'
+      },
       body: JSON.stringify({
         url: analyzedUrl,
         format,
@@ -432,7 +508,7 @@ async function downloadMedia() {
     });
 
     if (!response.ok) throw new Error(await readError(response));
-    const { downloadUrl, filename } = await response.json();
+    const { downloadUrl, filename } = await readDownloadStream(response, outputLabel);
     if (activeDownload !== request) return;
 
     const link = document.createElement('a');

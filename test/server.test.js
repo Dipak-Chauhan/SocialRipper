@@ -32,23 +32,29 @@ test('validateMediaUrl rejects unsafe or unsupported links', () => {
   assert.throws(() => validateMediaUrl('https://youtube.com:8443/watch?v=test'), /custom port/);
 });
 
-test('downloadOptions creates unbounded video and audio configurations', () => {
+test('downloadOptions creates unbounded fast video and audio configurations', () => {
   const video = downloadOptions('mp4', '720', 'media.%(ext)s');
   assert.match(video.format, /height<=720/);
-  assert.equal(video.mergeOutputFormat, 'mp4/mkv');
-  assert.equal(video.recodeVideo, 'mp4');
+  assert.equal(video.mergeOutputFormat, 'mp4');
+  assert.equal(video.remuxVideo, 'mp4');
+  assert.equal(video.formatSort, 'ext:mp4:m4a,vcodec:h264');
+  assert.equal(video.concurrentFragments, 4);
+  assert.equal(video.forceIpv4, true);
   assert.equal(video.maxFilesize, undefined);
 
   const webm = downloadOptions('webm', '1080', 'media.%(ext)s');
   assert.match(webm.format, /height<=1080/);
   assert.equal(webm.mergeOutputFormat, 'webm/mkv');
   assert.equal(webm.recodeVideo, 'webm');
+  assert.match(webm.postprocessorArgs, /-deadline realtime -cpu-used 4/);
   assert.equal(webm.maxFilesize, undefined);
 
   const audio = downloadOptions('mp3', '192', 'media.%(ext)s');
   assert.equal(audio.audioFormat, 'mp3');
   assert.equal(audio.audioQuality, '192K');
   assert.equal(audio.extractAudio, true);
+  assert.equal(audio.concurrentFragments, 4);
+  assert.equal(audio.forceIpv4, true);
   assert.equal(audio.maxFilesize, undefined);
 });
 
@@ -247,8 +253,11 @@ async function startFixtureServer(context, serverOptions = {}) {
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
-const url = args.at(-1);
 const next = (flag) => args[args.indexOf(flag) + 1];
+const infoJsonFile = args.includes('--load-info-json') ? next('--load-info-json') : null;
+const url = infoJsonFile
+  ? JSON.parse(fs.readFileSync(infoJsonFile, 'utf8')).webpage_url
+  : args.at(-1);
 const put = (name, value) => fs.writeFileSync(path.join(${JSON.stringify(directory)}, name), String(value));
 ${script}
 `;
@@ -259,9 +268,21 @@ if (args.includes('--dump-single-json')) {
     put(url.split('/').pop(), process.pid);
     setInterval(() => {}, 1000);
   } else {
-    console.log(JSON.stringify({ title: 'Fixture video', extractor_key: 'Fixture' }));
+    fs.appendFileSync(path.join(${JSON.stringify(directory)}, 'inspect-count.log'), url + '\\n');
+    console.log(JSON.stringify({ title: 'Fixture video', extractor_key: 'Fixture', webpage_url: url }));
   }
 } else {
+  if (infoJsonFile) {
+    fs.appendFileSync(path.join(${JSON.stringify(directory)}, 'load-info-used.log'), url + '\\n');
+    if (url.includes('/expired-cache')) {
+      console.error('HTTP Error 403: Forbidden');
+      process.exit(1);
+    }
+  }
+  if (args.includes('--progress-template')) {
+    console.log('SR_PROGRESS: 50.0%| 8.5MiB/s|00:02');
+    console.log('SR_PROGRESS:100.0%| 9.1MiB/s|00:00');
+  }
   const filename = next('--output').replace('%(ext)s', 'mp4');
   if (url.includes('/large')) {
     const descriptor = fs.openSync(filename, 'w');
@@ -603,4 +624,70 @@ test('server.shutdown kills active jobs and cleans up pending temporary director
   await assert.rejects(fs.stat(path.dirname(streamOutput)), { code: 'ENOENT' });
   const outcome = await inspection;
   assert.ok(outcome instanceof Error || outcome?.status === 503);
+});
+
+test('info cache speeds up repeat inspections, reuses load-info-json, and falls back on expired cache', { skip: process.platform === 'win32' }, async (context) => {
+  const { origin, directory } = await startFixtureServer(context);
+  const url = 'https://youtu.be/cached-video';
+
+  const first = await post(origin, 'info', { url });
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).title, 'Fixture video');
+
+  const second = await post(origin, 'info', { url });
+  assert.equal(second.status, 200);
+  assert.equal((await second.json()).title, 'Fixture video');
+
+  const inspectLog = (await fs.readFile(path.join(directory, 'inspect-count.log'), 'utf8')).trim().split('\n');
+  assert.equal(inspectLog.length, 1);
+
+  const cachedDownload = await post(origin, 'downloads', { url, format: 'mp4', quality: 'best' });
+  assert.equal(cachedDownload.status, 200);
+  const { downloadUrl } = await cachedDownload.json();
+  const loadUsed = await fs.readFile(path.join(directory, 'load-info-used.log'), 'utf8');
+  assert.match(loadUsed, /cached-video/);
+  assert.equal(await (await fetch(`${origin}${downloadUrl}`)).text(), 'fixture video');
+
+  // When cached info fails during download (e.g. expired CDN URL), server falls back to live URL.
+  const expiredUrl = 'https://youtu.be/expired-cache';
+  assert.equal((await post(origin, 'info', { url: expiredUrl })).status, 200);
+  const fallbackPrep = await post(origin, 'downloads', { url: expiredUrl, format: 'mp4', quality: 'best' });
+  assert.equal(fallbackPrep.status, 200);
+  const fallbackInfo = await fallbackPrep.json();
+  assert.equal(await (await fetch(`${origin}${fallbackInfo.downloadUrl}`)).text(), 'fixture video');
+});
+
+test('POST /api/downloads streams NDJSON progress events when requested', { skip: process.platform === 'win32' }, async (context) => {
+  const { origin } = await startFixtureServer(context);
+  const response = await post(origin, 'downloads', {
+    url: 'https://youtu.be/progress-test',
+    format: 'mp4',
+    quality: 'best',
+    title: 'Progress Video'
+  }, {
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/x-ndjson, application/json'
+    }
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /application\/x-ndjson/);
+  const lines = (await response.text()).trim().split('\n').map((line) => JSON.parse(line));
+
+  assert.equal(lines[0].stage, 'starting');
+  const progressEvent = lines.find((event) => event.stage === 'downloading' && event.percent === 50);
+  assert.ok(progressEvent);
+  assert.equal(progressEvent.speed, '8.5MiB/s');
+  assert.equal(progressEvent.eta, '00:02');
+
+  const ready = lines.at(-1);
+  assert.equal(ready.stage, 'ready');
+  assert.match(ready.downloadUrl, /^\/api\/downloads\/[A-Za-z0-9_-]+$/);
+  assert.equal(ready.filename, 'Progress Video.mp4');
+  assert.equal(ready.size, Buffer.byteLength('fixture video'));
+
+  const fileResponse = await fetch(`${origin}${ready.downloadUrl}`);
+  assert.equal(fileResponse.status, 200);
+  assert.equal(await fileResponse.text(), 'fixture video');
 });
