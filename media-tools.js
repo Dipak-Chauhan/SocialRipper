@@ -29,6 +29,28 @@ function executableCandidates(name, override, bundled) {
   ].filter(Boolean);
 }
 
+function optionalTrimmed(value) {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+}
+
+function getExtractorConfig(env = process.env) {
+  const ytDlpCookiesFile = optionalTrimmed(env.YT_DLP_COOKIES_FILE);
+  const galleryDlCookiesFile = optionalTrimmed(env.GALLERY_DL_COOKIES_FILE);
+  return {
+    ytDlp: {
+      cookiesFile: ytDlpCookiesFile ? path.resolve(ytDlpCookiesFile) : null,
+      proxy: optionalTrimmed(env.YT_DLP_PROXY),
+      jsRuntimes: optionalTrimmed(env.YT_DLP_JS_RUNTIMES)
+    },
+    galleryDl: {
+      cookiesFile: galleryDlCookiesFile ? path.resolve(galleryDlCookiesFile) : null,
+      proxy: optionalTrimmed(env.GALLERY_DL_PROXY)
+    }
+  };
+}
+
 function getMediaTools() {
   return {
     'yt-dlp': executableCandidates('yt-dlp', process.env.YT_DLP_BIN, youtubeDlPackage.constants.YOUTUBE_DL_PATH),
@@ -198,18 +220,51 @@ function parseToolJson(output, isValid) {
   throw new AppError(422, 'The media extractor did not return usable metadata.');
 }
 
-async function runYtDlp(tools, url, flags, options) {
-  const executable = await requireTool(tools, 'yt-dlp');
-  const cacheDir = options.cacheDir || DEFAULT_YT_DLP_CACHE_DIR;
-  const args = ['--ignore-config', '--cache-dir', cacheDir, ...youtubeDlPackage.args(flags)];
-  if (!flags.loadInfoJson) {
-    args.push('--', url);
+async function withCookiesFile(cookiesFile, toolName, signal, operation) {
+  if (!cookiesFile) return operation(null);
+  signal?.throwIfAborted();
+
+  let contents;
+  try {
+    const stats = await fs.stat(cookiesFile);
+    if (!stats.isFile()) {
+      throw new Error('Not a regular file');
+    }
+    contents = await fs.readFile(cookiesFile);
+  } catch {
+    throw new AppError(503, `Configured ${toolName} cookies file could not be read.`);
   }
-  return runTool(executable, args, { ...options, name: 'yt-dlp', largeOutput: flags.dumpSingleJson });
+
+  // Isolate each run's cookie jar so yt-dlp write-back cannot race across jobs or fail on 0400 files.
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'social-ripper-cookies-'));
+  const tempFile = path.join(tempDir, 'cookies.txt');
+  try {
+    await fs.writeFile(tempFile, contents, { mode: 0o600 });
+    return await operation(tempFile);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
+  }
 }
 
-function galleryArgs(contentType) {
-  return [
+async function runYtDlp(tools, url, flags, options = {}) {
+  const executable = await requireTool(tools, 'yt-dlp');
+  const cacheDir = options.cacheDir || DEFAULT_YT_DLP_CACHE_DIR;
+  const ytDlpConfig = options.extractorConfig?.ytDlp || {};
+  return withCookiesFile(ytDlpConfig.cookiesFile, 'yt-dlp', options.signal, (cookiesFile) => {
+    const args = ['--ignore-config', '--cache-dir', cacheDir];
+    if (cookiesFile) args.push('--cookies', cookiesFile);
+    if (ytDlpConfig.proxy) args.push('--proxy', ytDlpConfig.proxy);
+    if (ytDlpConfig.jsRuntimes) args.push('--js-runtimes', ytDlpConfig.jsRuntimes);
+    args.push(...youtubeDlPackage.args(flags));
+    if (!flags.loadInfoJson) {
+      args.push('--', url);
+    }
+    return runTool(executable, args, { ...options, name: 'yt-dlp', largeOutput: flags.dumpSingleJson });
+  });
+}
+
+function galleryArgs(contentType, { cookiesFile = null, proxy = null } = {}) {
+  const args = [
     '--config-ignore', '--no-input', '--cache-file', ':memory:', '--warning',
     '--http-timeout', '15', '--retries', '1',
     '--child-range', '1', '--child-filter', "category == 'pinterest' and subcategory == 'pinit'",
@@ -217,13 +272,22 @@ function galleryArgs(contentType) {
     '--range', contentType === 'carousel' ? `1-${MAX_IMAGES}` : '1',
     '--filter', `extension.lower() in (${[...IMAGE_EXTENSIONS].map((ext) => `'${ext}'`).join(', ')})`
   ];
+  if (cookiesFile) args.push('--cookies', cookiesFile);
+  if (proxy) args.push('--proxy', proxy);
+  return args;
 }
 
-async function inspectImages(tools, url, contentType, signal) {
+async function inspectImages(tools, url, contentType, signal, { extractorConfig = null } = {}) {
   const executable = await requireTool(tools, 'gallery-dl');
-  const args = [...galleryArgs(contentType), '--resolve-json', '--', url];
-  const { output } = await runTool(executable, args, {
-    name: 'gallery-dl', signal, timeoutMs: 60_000, largeOutput: true
+  const galleryDlConfig = extractorConfig?.galleryDl || {};
+  const { output } = await withCookiesFile(galleryDlConfig.cookiesFile, 'gallery-dl', signal, (cookiesFile) => {
+    const args = [
+      ...galleryArgs(contentType, { cookiesFile, proxy: galleryDlConfig.proxy }),
+      '--resolve-json', '--', url
+    ];
+    return runTool(executable, args, {
+      name: 'gallery-dl', signal, timeoutMs: 60_000, largeOutput: true
+    });
   });
   const messages = parseToolJson(output, Array.isArray);
   const failure = messages.find((message) => message?.[0] === -1);
@@ -244,9 +308,16 @@ async function inspectImages(tools, url, contentType, signal) {
   };
 }
 
-async function downloadImages(tools, url, contentType, extension, { directory, signal, timeoutMs = 60 * 60_000, onProgress = null }) {
+async function downloadImages(tools, url, contentType, extension, {
+  directory,
+  signal,
+  timeoutMs = 60 * 60_000,
+  onProgress = null,
+  extractorConfig = null
+}) {
   const galleryDl = await requireTool(tools, 'gallery-dl');
   const ffmpeg = await requireTool(tools, 'ffmpeg');
+  const galleryDlConfig = extractorConfig?.galleryDl || {};
   const deadline = Date.now() + timeoutMs;
   const remainingTime = () => {
     const remainingMs = deadline - Date.now();
@@ -255,12 +326,14 @@ async function downloadImages(tools, url, contentType, extension, { directory, s
   };
 
   onProgress?.({ stage: 'downloading', detail: 'Fetching images...' });
-  const args = [
-    ...galleryArgs(contentType),
-    '-o', 'output.mode=null', '--Print', 'after:{_path}', '--directory', directory, '--', url
-  ];
-  const { output } = await runTool(galleryDl, args, {
-    name: 'gallery-dl', signal, timeoutMs: remainingTime()
+  const { output } = await withCookiesFile(galleryDlConfig.cookiesFile, 'gallery-dl', signal, (cookiesFile) => {
+    const args = [
+      ...galleryArgs(contentType, { cookiesFile, proxy: galleryDlConfig.proxy }),
+      '-o', 'output.mode=null', '--Print', 'after:{_path}', '--directory', directory, '--', url
+    ];
+    return runTool(galleryDl, args, {
+      name: 'gallery-dl', signal, timeoutMs: remainingTime()
+    });
   });
   const files = output ? output.split(/\r?\n/).slice(0, contentType === 'carousel' ? MAX_IMAGES : 1) : [];
   if (!files.length) throw new AppError(422, 'No downloadable images were found in this post.');
@@ -302,6 +375,6 @@ async function downloadImages(tools, url, contentType, extension, { directory, s
 }
 
 module.exports = {
-  AppError, downloadImages, findExecutable, getMediaTools,
+  AppError, downloadImages, findExecutable, getExtractorConfig, getMediaTools,
   inspectImages, parseToolJson, requireTool, runYtDlp
 };

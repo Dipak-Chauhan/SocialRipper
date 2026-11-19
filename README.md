@@ -150,6 +150,9 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Check `/api/health` to veri
 | `PENDING_DOWNLOAD_TTL_MS` | Time in milliseconds before an unclaimed one-time `/api/downloads/:token` URL expires and cleans up its temp directory. Defaults to `60000` (60 seconds). |
 | `YT_DLP_BIN` / `FFMPEG_BIN` | Override paths for `yt-dlp` and `ffmpeg` executables. |
 | `GALLERY_DL_BIN` | Path to `gallery-dl` when installed outside `PATH` and `node_modules/.bin`. |
+| `YT_DLP_COOKIES_FILE` / `GALLERY_DL_COOKIES_FILE` | Path to a Netscape-format `cookies.txt` file passed to `yt-dlp` or `gallery-dl` via an isolated per-job temp copy (`0600`). Useful when platforms enforce bot checks or login walls on cloud VPS IPs. |
+| `YT_DLP_PROXY` / `GALLERY_DL_PROXY` | Optional HTTP/HTTPS/SOCKS proxy URL passed via `--proxy` to `yt-dlp` or `gallery-dl`. |
+| `YT_DLP_JS_RUNTIMES` | Optional `yt-dlp --js-runtimes` value (for example `node` when `deno` is not installed on the server). |
 
 ### Public Deployment (Reverse Proxy)
 
@@ -228,6 +231,7 @@ Test with `nginx -t` before reloading ([Nginx proxy docs](https://nginx.org/en/d
 | HTTP 403 on LAN or behind a reverse proxy | Bind `HOST=0.0.0.0` for direct LAN IP access; behind a reverse proxy set `ALLOWED_HOSTS=<hostname>` or verify upstream `Host` and `Origin` headers. |
 | HTTP 404 when saving a file | One-time `/api/downloads/:token` links expire after single use or `PENDING_DOWNLOAD_TTL_MS`. Click **Download** again. |
 | HTTP 429 | Both shared job slots are active, or the reverse proxy's rate limit was reached. Wait briefly and retry. |
+| Public videos fail with bot-check or rate-limit errors on a cloud VPS | Cloud datacenter IPs (Oracle Cloud, AWS, etc.) often trigger platform bot checks or rate limits. Set `YT_DLP_COOKIES_FILE` (plus `YT_DLP_JS_RUNTIMES=node` if `deno` is absent) or `YT_DLP_PROXY`, and `GALLERY_DL_COOKIES_FILE` or `GALLERY_DL_PROXY`, then restart the service. |
 
 ---
 

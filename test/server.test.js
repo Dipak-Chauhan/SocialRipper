@@ -8,10 +8,12 @@ const test = require('node:test');
 const {
   contentDisposition,
   createServer,
+  downloaderMessage,
   downloadOptions,
   parsePort,
   validateMediaUrl
 } = require('../server');
+const { getExtractorConfig } = require('../media-tools');
 
 test('validateMediaUrl accepts supported HTTPS links', () => {
   assert.equal(
@@ -56,6 +58,55 @@ test('downloadOptions creates unbounded fast video and audio configurations', ()
   assert.equal(audio.concurrentFragments, 4);
   assert.equal(audio.forceIpv4, true);
   assert.equal(audio.maxFilesize, undefined);
+});
+
+test('downloaderMessage distinguishes bot checks and rate limits from private media', () => {
+  assert.match(
+    downloaderMessage(new Error('ERROR: [youtube] 1lrFsXkT_rM: Sign in to confirm you\u2019re not a bot.')),
+    /bot check/
+  );
+  assert.match(
+    downloaderMessage(new Error("ERROR: [youtube] 1lrFsXkT_rM: Sign in to confirm you're not a bot.")),
+    /bot check/
+  );
+  assert.match(
+    downloaderMessage(new Error('Requested content is not available, rate-limit reached or login required.')),
+    /rate-limiting/
+  );
+  assert.match(downloaderMessage(new Error('HTTP Error 429: Too Many Requests')), /rate-limiting/);
+  assert.match(
+    downloaderMessage(new Error("Private video. Sign in if you've been granted access to this video")),
+    /private or requires an account/
+  );
+  assert.match(downloaderMessage(new Error('Video unavailable')), /unavailable or restricted/);
+  assert.match(downloaderMessage(new Error('Unsupported URL: https://example.com')), /not supported/);
+});
+
+test('getExtractorConfig resolves cookie paths, trims values, and defaults blank entries to null', () => {
+  const empty = getExtractorConfig({ YT_DLP_COOKIES_FILE: '   ', YT_DLP_PROXY: '' });
+  assert.deepEqual(empty, {
+    ytDlp: { cookiesFile: null, proxy: null, jsRuntimes: null },
+    galleryDl: { cookiesFile: null, proxy: null }
+  });
+
+  const configured = getExtractorConfig({
+    YT_DLP_COOKIES_FILE: '  ./cookies/yt.txt ',
+    YT_DLP_PROXY: ' socks5://127.0.0.1:1080 ',
+    YT_DLP_JS_RUNTIMES: ' node ',
+    GALLERY_DL_COOKIES_FILE: './cookies/gd.txt',
+    GALLERY_DL_PROXY: ' http://127.0.0.1:8080 '
+  });
+  assert.deepEqual(configured, {
+    ytDlp: {
+      cookiesFile: path.resolve('./cookies/yt.txt'),
+      proxy: 'socks5://127.0.0.1:1080',
+      jsRuntimes: 'node'
+    },
+    galleryDl: {
+      cookiesFile: path.resolve('./cookies/gd.txt'),
+      proxy: 'http://127.0.0.1:8080'
+    }
+  });
 });
 
 test('parsePort validates ports strictly', () => {
@@ -145,6 +196,15 @@ test('server serves the app, PWA assets, share target, and validates API input',
   assert.match(html, /href="https:\/\/github\.com\/Dipak-Chauhan\/SocialRipper"[^>]*rel="noopener noreferrer"/);
   assert.match(html, /href="https:\/\/ko-fi\.com\/dipakchauhan"[^>]*rel="noopener noreferrer"/);
   assert.match(html, /href="https:\/\/buymeacoffee\.com\/dipakchauhan"[^>]*rel="noopener noreferrer"/);
+  for (const url of [
+    'https://github.com/Dipak-Chauhan/SocialRipper',
+    'https://ko-fi.com/dipakchauhan',
+    'https://buymeacoffee.com/dipakchauhan'
+  ]) {
+    assert.equal(html.split(url).length - 1, 1, `expected ${url} once in index.html`);
+  }
+  assert.doesNotMatch(html, /class="masthead-link"/);
+  assert.doesNotMatch(html, /class="footer-links"/);
 
   const shareResponse = await fetch(`${origin}/share-target?text=${encodeURIComponent('Watch https://www.instagram.com/reel/example/')}`);
   assert.equal(shareResponse.status, 200);
@@ -263,6 +323,15 @@ ${script}
 `;
   const scripts = {
     'yt-dlp': `
+fs.appendFileSync(path.join(${JSON.stringify(directory)}, 'yt-dlp-args.log'), JSON.stringify(args) + '\\n');
+const cookiesArg = args.includes('--cookies') ? next('--cookies') : null;
+if (cookiesArg) {
+  fs.appendFileSync(cookiesArg, '\\n# mutated');
+}
+if (url.includes('/bot-check')) {
+  console.error('ERROR: [youtube] bot: Sign in to confirm you\\u2019re not a bot.');
+  process.exit(1);
+}
 if (args.includes('--dump-single-json')) {
   if (url.includes('/slow')) {
     put(url.split('/').pop(), process.pid);
@@ -300,6 +369,7 @@ if (args.includes('--dump-single-json')) {
   }
 }`,
     'gallery-dl': `
+fs.appendFileSync(path.join(${JSON.stringify(directory)}, 'gallery-dl-args.log'), JSON.stringify(args) + '\\n');
 if (url.includes('/video-only')) {
   console.log('[]');
 } else if (args.includes('--resolve-json')) {
@@ -690,4 +760,96 @@ test('POST /api/downloads streams NDJSON progress events when requested', { skip
   const fileResponse = await fetch(`${origin}${ready.downloadUrl}`);
   assert.equal(fileResponse.status, 200);
   assert.equal(await fileResponse.text(), 'fixture video');
+});
+
+test('extractor errors surface bot checks clearly and missing cookies fail with 503', { skip: process.platform === 'win32' }, async (context) => {
+  const { origin } = await startFixtureServer(context);
+  const botResponse = await post(origin, 'info', { url: 'https://youtu.be/bot-check' });
+  assert.equal(botResponse.status, 422);
+  const botError = (await botResponse.json()).error;
+  assert.match(botError, /bot check/);
+  assert.doesNotMatch(botError, /private or requires an account/);
+
+  const missingCookies = await startFixtureServer(context, {
+    extractorConfig: {
+      ytDlp: {
+        cookiesFile: path.join(os.tmpdir(), `missing-cookies-${process.pid}.txt`),
+        proxy: null,
+        jsRuntimes: null
+      },
+      galleryDl: { cookiesFile: null, proxy: null }
+    }
+  });
+  const missingResponse = await post(missingCookies.origin, 'info', { url: 'https://youtu.be/example' });
+  assert.equal(missingResponse.status, 503);
+  assert.match((await missingResponse.json()).error, /cookies file could not be read/);
+});
+
+test('extractorConfig passes isolated temp cookies, proxy, and js-runtimes without mutating 0400 files', { skip: process.platform === 'win32' }, async (context) => {
+  const cookiesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'social-ripper-cookies-src-'));
+  context.after(() => fs.rm(cookiesDir, { recursive: true, force: true }));
+
+  const initialCookies = '# Netscape HTTP Cookie File\n';
+  const ytCookies = path.join(cookiesDir, 'yt-cookies.txt');
+  const gdCookies = path.join(cookiesDir, 'gd-cookies.txt');
+  await fs.writeFile(ytCookies, initialCookies, 'utf8');
+  await fs.writeFile(gdCookies, initialCookies, 'utf8');
+  await fs.chmod(ytCookies, 0o400);
+  await fs.chmod(gdCookies, 0o400);
+
+  const { origin, directory } = await startFixtureServer(context, {
+    extractorConfig: {
+      ytDlp: { cookiesFile: ytCookies, proxy: 'socks5://127.0.0.1:1080', jsRuntimes: 'node' },
+      galleryDl: { cookiesFile: gdCookies, proxy: 'http://127.0.0.1:8080' }
+    }
+  });
+
+  const videoInfo = await post(origin, 'info', { url: 'https://youtu.be/cookie-test' });
+  assert.equal(videoInfo.status, 200);
+  await videoInfo.json();
+
+  const videoPrep = await post(origin, 'downloads', {
+    url: 'https://youtu.be/cookie-test',
+    format: 'mp4',
+    quality: 'best'
+  });
+  assert.equal(videoPrep.status, 200);
+  const { downloadUrl } = await videoPrep.json();
+  assert.equal(await (await fetch(`${origin}${downloadUrl}`)).text(), 'fixture video');
+
+  const ytCalls = (await fs.readFile(path.join(directory, 'yt-dlp-args.log'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(ytCalls.length, 2);
+  for (const args of ytCalls) {
+    const tempCookie = args[args.indexOf('--cookies') + 1];
+    assert.ok(tempCookie && tempCookie !== ytCookies);
+    assert.equal(args[args.indexOf('--proxy') + 1], 'socks5://127.0.0.1:1080');
+    assert.equal(args[args.indexOf('--js-runtimes') + 1], 'node');
+    await waitForRemoved(path.dirname(tempCookie));
+  }
+  assert.equal(await fs.readFile(ytCookies, 'utf8'), initialCookies);
+
+  const imageUrl = 'https://www.instagram.com/p/cookie-test/';
+  const imageInfo = await post(origin, 'info', { url: imageUrl, contentType: 'post' });
+  assert.equal(imageInfo.status, 200);
+  await imageInfo.json();
+
+  const imageDownload = await post(origin, 'download', { url: imageUrl, contentType: 'post', format: 'jpg' });
+  assert.equal(imageDownload.status, 200);
+  assert.equal(await imageDownload.text(), 'first');
+
+  const gdCalls = (await fs.readFile(path.join(directory, 'gallery-dl-args.log'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(gdCalls.length, 2);
+  for (const args of gdCalls) {
+    const tempCookie = args[args.indexOf('--cookies') + 1];
+    assert.ok(tempCookie && tempCookie !== gdCookies);
+    assert.equal(args[args.indexOf('--proxy') + 1], 'http://127.0.0.1:8080');
+    await waitForRemoved(path.dirname(tempCookie));
+  }
+  assert.equal(await fs.readFile(gdCookies, 'utf8'), initialCookies);
 });

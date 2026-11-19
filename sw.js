@@ -1,7 +1,7 @@
-const CACHE_NAME = 'social-ripper-shell-v7';
+const CACHE_NAME = 'social-ripper-shell-v8';
 const SHELL_ASSETS = [
   '/',
-  '/social-ripper.css?v=14',
+  '/social-ripper.css?v=15',
   '/app.js?v=9',
   '/manifest.webmanifest',
   '/icons/icon-192.png?v=3',

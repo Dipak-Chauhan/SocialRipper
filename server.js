@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
 const {
-  AppError, downloadImages, findExecutable, getMediaTools,
+  AppError, downloadImages, findExecutable, getExtractorConfig, getMediaTools,
   inspectImages, parseToolJson, requireTool, runYtDlp
 } = require('./media-tools');
 
@@ -339,9 +339,26 @@ function contentDisposition(title, extension, suffix = '') {
 }
 
 function downloaderMessage(error) {
-  const detail = error.message.toLowerCase();
+  const detail = String(error?.message || '').toLowerCase();
   if (detail.includes('unsupported url') || detail.includes('no suitable extractor')) {
     return 'This link is not supported by the media extractor.';
+  }
+  if (
+    detail.includes('not a bot')
+    || detail.includes('captcha')
+    || detail.includes('verify you are human')
+    || detail.includes('automated queries')
+  ) {
+    return 'This platform blocked the server IP with a bot check. Configure cookies or a proxy on the host, or try again later.';
+  }
+  if (
+    detail.includes('rate-limit')
+    || detail.includes('rate limit')
+    || detail.includes('too many requests')
+    || detail.includes('http error 429')
+    || detail.includes('wait a few minutes')
+  ) {
+    return 'This platform is rate-limiting requests from this server. Configure cookies or a proxy on the host, or try again later.';
   }
   if (detail.includes('private') || detail.includes('login') || detail.includes('sign in')) {
     return 'This media is private or requires an account. Only public links can be downloaded.';
@@ -384,7 +401,7 @@ async function serveStatic(response, pathname) {
   return true;
 }
 
-async function inspectVideo(tools, url, signal) {
+async function inspectVideo(tools, url, signal, { extractorConfig = null } = {}) {
   const options = {
     dumpSingleJson: true,
     forceIpv4: true,
@@ -395,7 +412,7 @@ async function inspectVideo(tools, url, signal) {
     noPlaylist: true,
     playlistEnd: 1
   };
-  const { output } = await runYtDlp(tools, url, options, { signal, timeoutMs: 60_000 });
+  const { output } = await runYtDlp(tools, url, options, { signal, timeoutMs: 60_000, extractorConfig });
   const info = parseToolJson(output, (data) => data && typeof data === 'object' && !Array.isArray(data));
   if (Array.isArray(info.entries)) throw new AppError(422, 'Use a link to an individual video.');
   const thumbnailData = Array.isArray(info.thumbnails)
@@ -431,10 +448,10 @@ function buildMetadata(info) {
   };
 }
 
-async function mediaInfo(response, { url, contentType, tools, signal, saveCache = null }) {
+async function mediaInfo(response, { url, contentType, tools, signal, saveCache = null, extractorConfig = null }) {
   const extracted = await extractMedia(() => contentType === 'video'
-    ? inspectVideo(tools, url, signal)
-    : inspectImages(tools, url, contentType, signal));
+    ? inspectVideo(tools, url, signal, { extractorConfig })
+    : inspectImages(tools, url, contentType, signal, { extractorConfig }));
   const rawInfo = contentType === 'video' ? extracted.metadata : extracted;
   const metadata = buildMetadata(rawInfo);
   saveCache?.({
@@ -477,7 +494,7 @@ async function downloadVideo(
   directory,
   signal,
   timeoutMs,
-  { cachedRawJson = null, invalidateCache = null, onProgress = null } = {}
+  { cachedRawJson = null, invalidateCache = null, onProgress = null, extractorConfig = null } = {}
 ) {
   const template = path.join(directory, 'media.%(ext)s');
   const ffmpegLocation = await requireTool(tools, 'ffmpeg');
@@ -495,7 +512,8 @@ async function downloadVideo(
     const { diagnostic } = await runYtDlp(tools, url, options, {
       signal,
       timeoutMs: remainingMs,
-      onLine: progressReporter
+      onLine: progressReporter,
+      extractorConfig
     });
 
     const name = 'media.' + format;
@@ -581,7 +599,8 @@ async function prepareDownload({
   removeDirectory,
   cachedRawJson = null,
   invalidateCache = null,
-  onProgress = null
+  onProgress = null,
+  extractorConfig = null
 }) {
   const { format, quality, extension } = validateDownloadParams(contentType, body);
 
@@ -591,13 +610,15 @@ async function prepareDownload({
       ? downloadVideo(tools, url, format, quality, directory, signal, downloadTimeoutMs, {
           cachedRawJson,
           invalidateCache,
-          onProgress
+          onProgress,
+          extractorConfig
         })
       : downloadImages(tools, url, contentType, extension, {
           directory,
           signal,
           timeoutMs: downloadTimeoutMs,
-          onProgress
+          onProgress,
+          extractorConfig
         }));
     signal.throwIfAborted();
 
@@ -655,6 +676,7 @@ async function mediaHealth(tools) {
 
 function createServer({
   tools = getMediaTools(),
+  extractorConfig = getExtractorConfig(),
   host = HOST,
   allowedHosts = DEFAULT_ALLOWED_HOSTS,
   downloadTimeoutMs = DOWNLOAD_TIMEOUT_MS,
@@ -824,7 +846,8 @@ function createServer({
                 contentType,
                 tools,
                 signal: controller.signal,
-                saveCache: (entry) => setCachedInfo(cacheKey, entry)
+                saveCache: (entry) => setCachedInfo(cacheKey, entry),
+                extractorConfig
               });
             } finally {
               detach();
@@ -850,7 +873,8 @@ function createServer({
                 downloadTimeoutMs,
                 removeDirectory,
                 cachedRawJson: cached?.rawJson || null,
-                invalidateCache: () => infoCache.delete(cacheKey)
+                invalidateCache: () => infoCache.delete(cacheKey),
+                extractorConfig
               });
               try {
                 await streamPreparedDownload(response, prepared, controller.signal);
@@ -895,7 +919,8 @@ function createServer({
               removeDirectory,
               cachedRawJson: cached?.rawJson || null,
               invalidateCache: () => infoCache.delete(cacheKey),
-              onProgress: sendEvent
+              onProgress: sendEvent,
+              extractorConfig
             });
             if (shuttingDown || controller.signal.aborted) {
               await removeDirectory(prepared.directory);
@@ -1018,4 +1043,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { contentDisposition, createServer, downloadOptions, parsePort, validateMediaUrl };
+module.exports = { contentDisposition, createServer, downloaderMessage, downloadOptions, parsePort, validateMediaUrl };
