@@ -1,23 +1,84 @@
-<p align="left">
-  <img src="icons/icon-192.png" width="56" height="56" alt="Social Ripper logo">
+<p align="center">
+  <a href="#what-is-social-ripper">
+    <img src="docs/images/logo.png" alt="Social Ripper Logo" width="140">
+  </a>
 </p>
 
-# Social Ripper
+<h1 align="center">Social Ripper</h1>
 
-A self-hosted web app and installable PWA for saving video, audio, and images from public social media links. Preview the source, pick an output format, and stream downloads straight to your device—or share links directly from mobile apps into **SocialRipper**.
+<p align="center">
+  <strong>A self-hosted, privacy-respecting web app &amp; PWA for downloading public social media.</strong>
+</p>
 
-![Social Ripper workspace with URL, media type, format, and quality controls](docs/images/workspace.webp)
+<p align="center">
+  <a href="#features">Features</a> -
+  <a href="#what-is-social-ripper">Preview</a> -
+  <a href="#mobile--pwa">PWA &amp; Share</a> -
+  <a href="#self-hosting">Self-Hosting</a> -
+  <a href="#usage">Usage</a> -
+  <a href="#troubleshooting">Troubleshooting</a>
+</p>
 
-## Formats and sources
+<p align="center">
+  <a href="https://github.com/Dipak-Chauhan/social-ripper/stargazers">
+    <img src="https://img.shields.io/github/stars/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub stars">
+  </a>
+  <a href="https://github.com/Dipak-Chauhan/social-ripper/network/members">
+    <img src="https://img.shields.io/github/forks/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub forks">
+  </a>
+  <a href="https://github.com/Dipak-Chauhan/social-ripper/issues">
+    <img src="https://img.shields.io/github/issues/Dipak-Chauhan/social-ripper?style=for-the-badge&color=f04b23&labelColor=11110f" alt="GitHub issues">
+  </a>
+</p>
+
+---
+
+## What is Social Ripper?
+
+**Social Ripper** is a minimal, local-first utility for saving public reels, videos, audio tracks, photos, and multi-image carousels directly from your browser or mobile share sheet. No accounts, no third-party uploads, and no artificial file-size caps—just paste or share a link, inspect the preview, and stream the file straight to your device.
+
+> **Download only media you own or have permission to save.** Platform restrictions still apply.
+
+<p align="center">
+  <img src="docs/images/workspace.webp" alt="Social Ripper desktop workspace showing the logo, Extraction Desk controls, unlimited file limit, and all 9 supported inputs">
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="docs/images/preview.webp" width="340" alt="Full Social Ripper preview panel showing a YouTube source, 720p quality selection, and MP4 download button"><br>
+      <sub>Source Preview &amp; Streaming Download</sub>
+    </td>
+    <td align="center">
+      <img src="docs/images/mobile.webp" width="230" alt="Mobile-first Extraction Desk positioned at the top above the fold with the bottom PWA install prompt"><br>
+      <sub>Mobile-First Extraction Desk &amp; PWA Install</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub>Preview sample © 2008 Blender Foundation · <a href="https://peach.blender.org/about/">Big Buck Bunny license</a></sub>
+</p>
+
+---
+
+## Features
+
+### Media & Quality
 
 | Media | Output | Options |
 | --- | --- | --- |
-| Video or reel | MP4, WebM | Best available, or up to 1080p, 720p, or 480p (remuxes or recodes via FFmpeg when needed) |
+| Video or reel | MP4, WebM | Best available, 1080p, 720p, or 480p (stream-copies native containers or recodes via FFmpeg when needed) |
 | Audio from a video | MP3 | 320, 192, or 128 kbps |
-| Image post | JPG, PNG, WebP | First available image from the post (`mjpeg -q:v 2`, lossless `png`, `libwebp -quality 90`) |
-| Carousel | ZIP | Up to 20 images in the selected image format (`store`-mode ZIP) |
+| Image post | JPG, PNG, WebP | First image sanitized &amp; converted via FFmpeg (`mjpeg -q:v 2`, lossless `png`, `libwebp -quality 90`) |
+| Carousel | ZIP | Up to 20 images in the chosen image format packaged as a `store`-mode ZIP |
 
-The app accepts public HTTPS links from:
+- **No artificial file-size limit:** Downloads have no 250 MB cap and are bounded only by available disk space and upstream platform limits.
+- **Zero-RAM browser streaming:** Two-phase downloads (`POST /api/downloads` → one-time `GET /api/downloads/:token`) stream large files directly to disk without buffering them in browser memory.
+- **Unicode filenames:** Preserves non-ASCII media titles using RFC 5987 `filename*=UTF-8''...` with clean ASCII fallbacks.
+
+### Supported Platforms
+
 - **Instagram** (`instagram.com`)
 - **TikTok** (`tiktok.com`)
 - **YouTube** (`youtube.com`, `youtu.be`)
@@ -28,35 +89,48 @@ The app accepts public HTTPS links from:
 - **Reddit** (`reddit.com`, `redd.it`)
 - **Pinterest** (`pinterest.com`, `pin.it`)
 
-Available formats depend on the source and its restrictions. Downloads have **no artificial file-size cap** (bounded only by available disk space and upstream platform limits), stream straight to disk without buffering in browser memory, and preserve Unicode titles via RFC 5987 `Content-Disposition` filenames.
+### Mobile & PWA
 
-**Download only media you own or have permission to save.** Platform restrictions still apply.
+- **Zero-scroll mobile layout:** On phones and tablets (`<= 1020px`), the Extraction Desk moves directly to the top under a compact masthead so you can paste and inspect without scrolling.
+- **Installable PWA:** Non-blocking **Install Social Ripper** bottom popup (7-day dismiss cooldown) plus a persistent **INSTALL APP** header button for native installation on Android/Desktop Chromium and **Add to Home Screen** guidance on iOS Safari.
+- **Direct Android Share Target:** Registered on `/share-target`—share a Reel or post from Instagram, TikTok, YouTube, X, Reddit, or Pinterest straight to **SocialRipper** to extract the URL from captions, auto-inspect immediately (with automatic image/carousel fallback when `gallery-dl` is present), and download in one tap.
+- **Query URL launch:** Supports `/?url=<encoded-link>` for iOS Apple Shortcuts and bookmarklets.
 
-## Preview and download
+### Privacy & Reliability
 
-1. Paste a public HTTPS link and choose **Reel / video**, **Image post**, or **Carousel (ZIP)**.
-2. Select a format and quality, then click **Inspect link**. (On phones and tablets, the Extraction Desk sits at the top of the page so you can paste and inspect without scrolling.)
-3. Confirm the source in the preview and click **Download**. Use **Cancel** at any time to abort an active inspection or download preparation.
+- **Local-first & tracker-free:** Zero analytics, zero accounts, and zero third-party server uploads.
+- **Strict origin & CSP hardening:** Enforces same-origin validation (`Host`, `Origin`, `Sec-Fetch-Site`), DNS-rebinding guards, `object-src 'none'`, `no-referrer`, and `gallery-dl` / `ffmpeg` sandbox flags (`-protocol_whitelist file`, `--ignore-config`).
+- **Live tool status & graceful cancellation:** Displays `ENGINE ONLINE`, `VIDEO / AUDIO ONLY` (automatically disabling image/carousel modes when `gallery-dl` is absent), or `ENGINE UNAVAILABLE`. In-UI **Cancel**, client disconnects, and `SIGINT`/`SIGTERM` shutdown terminate full child process groups and clean up temporary files.
+- **Stream-safe Service Worker:** `sw.js` caches the static app shell while bypassing all `/api/*` paths so media inspection and streaming downloads are never intercepted.
 
-The masthead displays live tool readiness (`ENGINE ONLINE`, `VIDEO / AUDIO ONLY` when `gallery-dl` is unavailable and image/carousel options are disabled, or `ENGINE UNAVAILABLE`).
+---
 
-<p align="center">
-  <img src="docs/images/preview.webp" width="640" alt="The full Social Ripper download panel showing a YouTube URL, selected 720p quality, and an MP4 download button below the source preview">
-</p>
+## Usage
 
-*Preview sample © 2008 Blender Foundation. [Big Buck Bunny license](https://peach.blender.org/about/).*
+### Desktop & Mobile Browser
 
-## Install as an app (PWA & direct sharing)
+1. Paste a public HTTPS URL (or tap **PASTE**) and choose **Reel / video**, **Image post**, or **Carousel (ZIP)**.
+2. Select your container (`MP4`, `MP3`, `WEBM`, `JPG`, `PNG`, `WEBP`) and quality, then tap **Inspect link**.
+3. Confirm the source preview and tap **Download** (or tap **Cancel** to abort mid-flight).
 
-Social Ripper is an installable Progressive Web App (PWA) with Android **Web Share Target** support:
+### Direct Sharing on Mobile (PWA)
 
-- **Android & Desktop (Chrome, Edge, Brave):** Install from the bottom **Install Social Ripper** popup (dismisses for 7 days) or the **INSTALL APP** button in the header. Once installed on Android, tap **Share** in Instagram, TikTok, YouTube, X, Reddit, or Pinterest and pick **SocialRipper**—the app extracts the HTTPS URL from shared text/captions, auto-inspects it (falling back from video to image/carousel when `gallery-dl` is available), and puts the **Download** button immediately on screen.
-- **iPhone / iPad (Safari):** Open the install popup or tap **INSTALL APP** and follow Safari's **Share → Add to Home Screen** steps. You can also launch Social Ripper with `/?url=<encoded-link>` from an Apple Shortcut.
-- **HTTPS requirement:** Mobile browsers only enable PWA installation and Android Share Sheet registration when served over HTTPS (local desktop browsers also allow `http://127.0.0.1` and `http://localhost`). Deploy behind HTTPS (for example Nginx, Caddy, Cloudflare Tunnel, or Tailscale HTTPS) to install on your phone.
+1. Serve Social Ripper over **HTTPS** and install it via the **Install Social Ripper** popup (Android/Chrome/Edge) or **Share → Add to Home Screen** (iOS Safari).
+2. On Android, open **Instagram**, **TikTok**, **YouTube**, **X**, **Reddit**, or **Pinterest**, tap **Share**, and select **SocialRipper**—the link fills in and inspects automatically.
 
-## Run locally
+> **HTTPS requirement:** Mobile browsers only trigger native PWA install prompts and Android Share Sheet registration over HTTPS (local desktop browsers also allow `http://127.0.0.1` and `http://localhost`).
 
-Use Node.js 20 or newer. On Unix, the bundled yt-dlp launcher also needs [a supported Python version](https://github.com/yt-dlp/yt-dlp#dependencies). For photos and carousels, install [gallery-dl](https://github.com/mikf/gallery-dl#installation) and make it available on your `PATH`.
+---
+
+## Self-Hosting
+
+### Prerequisites
+
+- **Node.js 20+**
+- **Python** on Unix for the bundled `yt-dlp` launcher ([yt-dlp dependencies](https://github.com/yt-dlp/yt-dlp#dependencies))
+- **[gallery-dl](https://github.com/mikf/gallery-dl#installation)** on `PATH` (or via `GALLERY_DL_BIN`) if you want photo post & carousel support
+
+### Local Installation
 
 ```bash
 git clone https://github.com/Dipak-Chauhan/social-ripper.git
@@ -65,44 +139,35 @@ npm ci
 npm start
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Visit `/api/health` to check whether the server can find each executable. Run `npm test` for the backend test suite.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Check `/api/health` to verify binary availability, and run `npm test` to execute the test suite.
 
-| Environment variable | Purpose |
+### Environment Variables
+
+| Variable | Purpose |
 | --- | --- |
-| `HOST` / `PORT` | Listen address and port. Defaults to `127.0.0.1:3000`. Binding `0.0.0.0` or `::` permits direct LAN IP access while still blocking arbitrary DNS-rebinding hostnames. |
+| `HOST` / `PORT` | Listen address and port. Defaults to `127.0.0.1:3000`. Binding `0.0.0.0` or `::` allows direct LAN IP access while still rejecting arbitrary DNS-rebinding hostnames. |
 | `ALLOWED_HOSTS` | Comma-separated public hostnames allowed by the same-origin check (e.g. `media.example.com`). |
-| `DOWNLOAD_TIMEOUT_MS` | Maximum time in milliseconds for a download/conversion job (shared deadline across carousel images). Defaults to `3600000` (60 minutes). |
-| `PENDING_DOWNLOAD_TTL_MS` | Time in milliseconds before an unclaimed one-time `/api/downloads/:token` link expires and cleans up its temporary directory. Defaults to `60000` (60 seconds). |
-| `YT_DLP_BIN` / `FFMPEG_BIN` | Paths to separately installed binaries when overriding the bundled tools. |
-| `GALLERY_DL_BIN` | Path to gallery-dl when it is installed outside `PATH` and `node_modules/.bin`. |
+| `DOWNLOAD_TIMEOUT_MS` | Maximum time in milliseconds per download/conversion job (shared deadline across carousel images). Defaults to `3600000` (60 minutes). |
+| `PENDING_DOWNLOAD_TTL_MS` | Time in milliseconds before an unclaimed one-time `/api/downloads/:token` URL expires and cleans up its temp directory. Defaults to `60000` (60 seconds). |
+| `YT_DLP_BIN` / `FFMPEG_BIN` | Override paths for `yt-dlp` and `ffmpeg` executables. |
+| `GALLERY_DL_BIN` | Path to `gallery-dl` when installed outside `PATH` and `node_modules/.bin`. |
 
-## How it works
-
-The Node.js server serves the web interface, PWA assets (`/manifest.webmanifest`, `/sw.js`, `/icons/*.png`), and `/share-target` route on the same origin. `sw.js` caches the static app shell while bypassing all `/api/*` requests so media inspections and file streams are never intercepted.
-
-- `GET /api/health` reports `yt-dlp`, `ffmpeg`, and `gallery-dl` availability.
-- `POST /api/info` retrieves sanitized metadata and preview dimensions.
-- `POST /api/downloads` prepares video/audio via `yt-dlp` and `ffmpeg` or images via `gallery-dl` and `ffmpeg`, returning a one-time `GET /api/downloads/:token` URL so the browser streams the file (or store-mode Archiver ZIP for carousels) straight to disk without RAM buffering.
-- `POST /api/download` is also supported for direct single-request streaming.
-
-Media processing uses the server's temporary storage. Inspection and download jobs share two concurrent slots per process. The server terminates entire child process groups when a client disconnects or on `SIGINT`/`SIGTERM` shutdown and removes temporary directories after every job.
-
-## Public deployment
+### Public Deployment (Reverse Proxy)
 
 1. Run `npm ci` and `npm start` as a persistent Node.js service with outbound HTTPS access and writable temporary storage.
-2. Keep the Node.js port private and put the public hostname behind an HTTPS reverse proxy. Either set `ALLOWED_HOSTS=media.example.com` on Node.js (and forward the public `Host` and `Origin` headers) or rewrite them at the proxy to match the upstream HTTP address.
-3. Rate-limit `/api/info`, `/api/download`, and `/api/downloads` at the proxy. Check `/api/health`, then inspect and download a sample through the public HTTPS URL.
+2. Keep the Node.js port private behind an HTTPS reverse proxy (Nginx, Caddy, Cloudflare Tunnel, or Tailscale HTTPS). Set `ALLOWED_HOSTS=media.example.com` (or rewrite `Host` and `Origin` at the proxy to match the upstream address).
+3. Rate-limit `/api/info`, `/api/download`, and `/api/downloads` at the proxy and disable proxy buffering on `/api/downloads/` for streaming downloads.
 
 <details>
 <summary>Nginx configuration example</summary>
 
-Add the rate-limit zone inside Nginx's `http` block.
+Add the rate-limit zone inside Nginx's `http` block:
 
 ```nginx
 limit_req_zone $binary_remote_addr zone=social_ripper:10m rate=12r/m;
 ```
 
-Add the following to your HTTPS `server` block. Replace `media.example.com` with your public hostname and adjust the upstream address and port to match Node.js. If Node.js is started with `ALLOWED_HOSTS=media.example.com`, you can forward the public `Host` and `Origin` directly instead of overriding them.
+Add the following to your HTTPS `server` block (replacing `media.example.com` with your public hostname):
 
 ```nginx
 server_name media.example.com;
@@ -140,17 +205,43 @@ location ^~ /api/downloads/ {
 }
 ```
 
-Test the configuration with `nginx -t` before reloading. [Nginx proxy directives](https://nginx.org/en/docs/http/ngx_http_proxy_module.html) · [Request limiting](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html)
+Test with `nginx -t` before reloading ([Nginx proxy docs](https://nginx.org/en/docs/http/ngx_http_proxy_module.html) · [Rate limiting](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html)).
 
 </details>
 
-### Troubleshooting
+### Architecture & API
+
+- `GET /api/health` — Returns readiness (`200` / `503`) and availability of `yt-dlp`, `ffmpeg`, and `gallery-dl`.
+- `POST /api/info` — Fetches sanitized metadata (`title`, `uploader`, `platform`, `duration`, `thumbnail`, `width`, `height`, `itemCount`).
+- `POST /api/downloads` → `GET /api/downloads/:token` — Prepares media into a temp directory, reserves a job slot until transfer ends or `PENDING_DOWNLOAD_TTL_MS` elapses, and streams the file or ZIP via a one-time token.
+- `POST /api/download` — Direct single-request streaming download endpoint.
+- `GET /share-target`, `/manifest.webmanifest`, `/sw.js`, `/icons/*.png` — PWA manifest, icons, service worker, and Android Web Share Target entry point.
+
+---
+
+## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
-| Engine unavailable or HTTP 503 | Check `/api/health` and confirm `yt-dlp` and `ffmpeg` are executable on the host. |
-| Image options disabled or fail | Confirm `gallery-dl` is available on `PATH`, `node_modules/.bin`, or `GALLERY_DL_BIN`, and that the post exposes downloadable images. |
-| Install prompt or Android Share Sheet missing | Mobile browsers require HTTPS for PWA installation and Web Share Target. Check that `/manifest.webmanifest` and `/sw.js` return `200`. |
-| HTTP 403 on LAN or after deploying | For LAN IP access bind `HOST=0.0.0.0`; behind a reverse proxy set `ALLOWED_HOSTS=<hostname>` or verify the proxy's `Host` and `Origin` headers. |
-| HTTP 404 when saving a file | One-time `/api/downloads/:token` links expire once fetched or after `PENDING_DOWNLOAD_TTL_MS`. Click **Download** again to prepare a fresh stream. |
-| HTTP 429 | Both job slots may be busy, or the proxy's rate limit may have been reached. Retry after a short wait. |
+| Engine unavailable or HTTP 503 | Visit `/api/health` and confirm `yt-dlp` and `ffmpeg` are executable on the host. |
+| Image options disabled or fail | Confirm `gallery-dl` is available on `PATH`, `node_modules/.bin`, or `GALLERY_DL_BIN`, and that the link exposes public images. |
+| Install prompt or Android Share Sheet missing | Mobile browsers require HTTPS for PWA installation and Web Share Target. Confirm `/manifest.webmanifest` and `/sw.js` return `200`. |
+| HTTP 403 on LAN or behind a reverse proxy | Bind `HOST=0.0.0.0` for direct LAN IP access; behind a reverse proxy set `ALLOWED_HOSTS=<hostname>` or verify upstream `Host` and `Origin` headers. |
+| HTTP 404 when saving a file | One-time `/api/downloads/:token` links expire after single use or `PENDING_DOWNLOAD_TTL_MS`. Click **Download** again. |
+| HTTP 429 | Both shared job slots are active, or the reverse proxy's rate limit was reached. Wait briefly and retry. |
+
+---
+
+<p align="center">
+  Made for fast, local, private media archiving
+</p>
+
+## Star History
+
+<a href="https://www.star-history.com/#Dipak-Chauhan/social-ripper&type=date&logscale&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Dipak-Chauhan/social-ripper&type=date&theme=dark&logscale&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Dipak-Chauhan/social-ripper&type=date&theme=light&logscale&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Dipak-Chauhan/social-ripper&type=date&theme=light&logscale&legend=top-left" />
+ </picture>
+</a>
